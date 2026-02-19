@@ -1,14 +1,33 @@
 import { GoogleGenAI } from "@google/genai";
 import { PropertyDetails, SearchResponse, ImageFile } from "../types";
 
+// Helper to safely retrieve API Key from various environment configurations
+const getApiKey = (): string | undefined => {
+  // 1. Standard Node/Webpack/Process injection (Preferred)
+  if (typeof process !== 'undefined' && process.env?.API_KEY) {
+    return process.env.API_KEY;
+  }
+  // 2. Vite injection (import.meta.env) - Common on Render
+  // We check for VITE_API_KEY as Vite often requires the VITE_ prefix
+  if ((import.meta as any).env?.VITE_API_KEY) {
+    return (import.meta as any).env.VITE_API_KEY;
+  }
+  // 3. Check for standard API_KEY in import.meta.env just in case
+  if ((import.meta as any).env?.API_KEY) {
+    return (import.meta as any).env.API_KEY;
+  }
+  return undefined;
+};
+
 export const searchPropertyVideos = async (
   details: PropertyDetails,
   frontImage: ImageFile | null,
   backImage: ImageFile | null
 ): Promise<SearchResponse> => {
-  const apiKey = process.env.API_KEY;
+  const apiKey = getApiKey();
+  
   if (!apiKey) {
-    throw new Error("API Key not found in environment variables");
+    throw new Error("API Key not found. Please ensure API_KEY (or VITE_API_KEY) is set in your Render.com Environment Variables.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -107,7 +126,7 @@ export const searchPropertyVideos = async (
 
   } catch (error) {
     console.error("Gemini API Error:", error);
-    throw new Error("Failed to search for videos. Please try again.");
+    throw new Error("Failed to search for videos. Please check your API Key and try again.");
   }
 };
 
@@ -124,7 +143,9 @@ export const generatePromotionalVideo = async (): Promise<string> => {
   }
 
   // Create a new instance with the potentially newly selected key
-  const apiKey = process.env.API_KEY;
+  // We re-fetch the key here, prioritizing process.env (which aistudio might inject)
+  const apiKey = getApiKey();
+  
   if (!apiKey) throw new Error("API Key not found");
   
   const ai = new GoogleGenAI({ apiKey });

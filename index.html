@@ -12,6 +12,10 @@
         background-color: #f8fafc;
       }
     </style>
+    <script>
+      // Polyfill process for browser environments to prevent "process is not defined" errors
+      window.process = window.process || { env: {} };
+    </script>
   <script type="importmap">
 {
   "imports": {
@@ -25,5 +29,6 @@
 </head>
   <body>
     <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
   </body>
 </html>

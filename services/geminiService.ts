@@ -50,7 +50,10 @@ export const searchPropertyVideos = async (
     Look for YouTube links, Vimeo links, Zillow/Redfin video tours, or real estate agency video pages.
     
     I want you to find as many relevant video links as possible.
-    If you find relevant video links, list them. 
+    
+    OUTPUT INSTRUCTIONS:
+    1. Provide a helpful summary of what you found.
+    2. If you find videos, explicitly list the FULL URL of every video or listing page in the text.
     
     If you absolutely cannot find any VIDEO content related to this specific address and MLS number, state that clearly.
   `;
@@ -88,31 +91,51 @@ export const searchPropertyVideos = async (
     });
 
     const summary = response.text || "No summary provided.";
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     
     // Deduplicate videos by URI
     const uniqueVideos = new Map();
 
-    chunks.forEach(chunk => {
-        if (chunk.web?.uri) {
-            const uri = chunk.web.uri;
-            // Basic normalization to avoid duplicates with/without trailing slash or query params if needed, 
-            // but strict URI check is usually safer to prevent breaking valid distinct links.
-            if (!uniqueVideos.has(uri)) {
+    const addVideo = (uri: string, title: string = "Video Link") => {
+        try {
+            // Basic cleanup of the URI (remove trailing punctuation often captured by regex like . or ,)
+            let cleanUri = uri.trim().replace(/[.,;:)]+$/, "");
+            
+            // Validate URL structure and protocol
+            if (!cleanUri.startsWith("http")) return;
+            new URL(cleanUri); // throws if invalid
+
+            if (!uniqueVideos.has(cleanUri)) {
                 let hostname = "unknown";
                 try {
-                    hostname = new URL(uri).hostname;
-                } catch (e) {
-                    // ignore invalid urls
-                }
+                    hostname = new URL(cleanUri).hostname;
+                } catch (e) {}
                 
-                uniqueVideos.set(uri, {
-                    title: chunk.web.title || "Video Link",
-                    uri: uri,
+                uniqueVideos.set(cleanUri, {
+                    title: title,
+                    uri: cleanUri,
                     source: hostname,
                 });
             }
+        } catch (e) {
+            // Invalid URL, skip
         }
+    };
+
+    // 1. Extract from Grounding Metadata (High confidence sources)
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    chunks.forEach(chunk => {
+        if (chunk.web?.uri) {
+            addVideo(chunk.web.uri, chunk.web.title || "Source Link");
+        }
+    });
+
+    // 2. Extract from Text Response (Fallback for when model mentions links but grounding misses them)
+    // Regex to find http/https URLs
+    const urlRegex = /(https?:\/\/[^\s<>"']+)/g;
+    const textMatches = summary.match(urlRegex) || [];
+    
+    textMatches.forEach(match => {
+        addVideo(match);
     });
 
     const videos = Array.from(uniqueVideos.values());

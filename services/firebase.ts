@@ -3,29 +3,29 @@ import firebase from "firebase/compat/app";
 import "firebase/compat/auth";
 import { getFirestore } from "firebase/firestore";
 
-// Helper to safely retrieve Env Vars (similar to geminiService)
-const getEnvVar = (key: string): string => {
-  // 1. Process.env
-  if (typeof process !== 'undefined' && process.env?.[key]) {
+// Helper to safely retrieve Env Vars
+const getEnv = (key: string): string => {
+  // 1. Check import.meta.env (Vite standard)
+  if ((import.meta as any).env && (import.meta as any).env[key]) {
+    return (import.meta as any).env[key];
+  }
+  
+  // 2. Check process.env (Fallback / Render Node environment)
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
     return process.env[key];
   }
-  // 2. Vite import.meta.env
-  const metaEnv = (import.meta as any).env;
-  if (metaEnv) {
-    if (metaEnv[`VITE_${key}`]) return metaEnv[`VITE_${key}`];
-    if (metaEnv[key]) return metaEnv[key];
-  }
+
   return "";
 };
 
-// Configuration object
+// Configuration object with VITE_ prefixes
 const firebaseConfig = {
-  apiKey: getEnvVar("FIREBASE_API_KEY"),
-  authDomain: getEnvVar("FIREBASE_AUTH_DOMAIN"),
-  projectId: getEnvVar("FIREBASE_PROJECT_ID"),
-  storageBucket: getEnvVar("FIREBASE_STORAGE_BUCKET"),
-  messagingSenderId: getEnvVar("FIREBASE_MESSAGING_SENDER_ID"),
-  appId: getEnvVar("FIREBASE_APP_ID")
+  apiKey: getEnv("VITE_FIREBASE_API_KEY"),
+  authDomain: getEnv("VITE_FIREBASE_AUTH_DOMAIN"),
+  projectId: getEnv("VITE_FIREBASE_PROJECT_ID"),
+  storageBucket: getEnv("VITE_FIREBASE_STORAGE_BUCKET"),
+  messagingSenderId: getEnv("VITE_FIREBASE_MESSAGING_SENDER_ID"),
+  appId: getEnv("VITE_FIREBASE_APP_ID")
 };
 
 // Initialize Firebase

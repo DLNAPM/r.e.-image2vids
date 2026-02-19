@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { PropertyDetails, ImageFile, SearchResponse, SavedSearch } from './types';
 import { searchPropertyVideos, generatePromotionalVideo } from './services/geminiService';
 import { auth, db, googleProvider } from './services/firebase';
-import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
+import firebase from 'firebase/compat/app';
 import { collection, addDoc, query, where, orderBy, getDocs, Timestamp } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
 import ImageUpload from './components/ImageUpload';
@@ -10,7 +11,7 @@ import VideoResult from './components/VideoResult';
 
 function App() {
   // Auth State
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<firebase.User | any | null>(null);
   
   // State for form inputs
   const [address, setAddress] = useState({ street: '', city: '', state: '', zip: '' });
@@ -38,7 +39,7 @@ function App() {
   // Auth Listener
   useEffect(() => {
     if (auth) {
-      const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      const unsubscribe = auth.onAuthStateChanged((currentUser: firebase.User | null) => {
         setUser(currentUser);
       });
       return () => unsubscribe();
@@ -46,22 +47,33 @@ function App() {
   }, []);
 
   const handleLogin = async () => {
-    if (!auth || !googleProvider) {
-      setError("Firebase not configured. Check environment variables.");
-      return;
-    }
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (err: any) {
-      setError("Login failed: " + err.message);
+    setError(null);
+    if (auth && googleProvider) {
+      try {
+        await auth.signInWithPopup(googleProvider);
+      } catch (err: any) {
+        setError("Login failed: " + err.message);
+      }
+    } else {
+      // Fallback to Guest Mode if Firebase is not configured
+      console.log("Firebase not configured. Using Guest Mode.");
+      const guestUser = {
+        uid: 'guest-' + Date.now(),
+        displayName: 'Guest User',
+        email: 'guest@demo.com',
+        photoURL: null,
+        isAnonymous: true
+      };
+      setUser(guestUser);
     }
   };
 
   const handleLogout = async () => {
     if (auth) {
-      await signOut(auth);
-      setHistoryList([]);
+      await auth.signOut();
     }
+    setUser(null);
+    setHistoryList([]);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -103,7 +115,7 @@ function App() {
   };
 
   const handleSaveSearch = async () => {
-    if (!user || !results || !db) return;
+    if (!user || !results) return;
     
     setSaveStatus('saving');
     try {
@@ -115,7 +127,16 @@ function App() {
         results
       };
 
-      await addDoc(collection(db, 'searches'), searchData);
+      if (db) {
+        await addDoc(collection(db, 'searches'), searchData);
+      } else {
+        // LocalStorage Fallback
+        const existing = localStorage.getItem('re_app_searches');
+        const searches: SavedSearch[] = existing ? JSON.parse(existing) : [];
+        searches.push({ ...searchData, id: 'local-' + Date.now() });
+        localStorage.setItem('re_app_searches', JSON.stringify(searches));
+      }
+
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 3000);
     } catch (err) {
@@ -125,20 +146,33 @@ function App() {
   };
 
   const loadHistory = async () => {
-    if (!user || !db) return;
+    if (!user) return;
     setLoadingHistory(true);
     setShowHistory(true);
     try {
-      const q = query(
-        collection(db, 'searches'),
-        where('userId', '==', user.uid),
-        orderBy('timestamp', 'desc')
-      );
-      const querySnapshot = await getDocs(q);
-      const items: SavedSearch[] = [];
-      querySnapshot.forEach((doc) => {
-        items.push({ id: doc.id, ...doc.data() } as SavedSearch);
-      });
+      let items: SavedSearch[] = [];
+
+      if (db) {
+        const q = query(
+            collection(db, 'searches'),
+            where('userId', '==', user.uid),
+            orderBy('timestamp', 'desc')
+        );
+        const querySnapshot = await getDocs(q);
+        querySnapshot.forEach((doc) => {
+            items.push({ id: doc.id, ...doc.data() } as SavedSearch);
+        });
+      } else {
+        // LocalStorage Fallback
+        const existing = localStorage.getItem('re_app_searches');
+        const allSearches: SavedSearch[] = existing ? JSON.parse(existing) : [];
+        // Filter by user ID (in case we switch guests, though normally localstorage is browser-bound)
+        // For guest mode, we just show all if matches or if isAnonymous
+        items = allSearches
+            .filter(s => s.userId === user.uid)
+            .sort((a, b) => b.timestamp - a.timestamp);
+      }
+
       setHistoryList(items);
     } catch (err) {
       console.error("Error loading history:", err);
@@ -308,7 +342,7 @@ function App() {
                     className="flex items-center gap-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
                 >
                     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.539-6.033-5.696  c0-3.159,2.701-5.698,6.033-5.698c1.6,0,3.046,0.575,4.172,1.52l2.766-2.753C17.788,3.992,15.343,3,12.544,3  C6.925,3,2.444,7.468,2.444,12.928c0,5.462,4.481,9.932,10.1,9.932c5.838,0,9.726-4.305,9.726-9.932  c0-0.621-0.057-1.226-0.165-1.815H12.545z"/></svg>
-                    Sign In
+                    Sign In {(!auth) && "(Guest)"}
                 </button>
             )}
 

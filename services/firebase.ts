@@ -1,5 +1,6 @@
-import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
+
+import firebase from "firebase/compat/app";
+import "firebase/compat/auth";
 import { getFirestore } from "firebase/firestore";
 
 // Helper to safely retrieve Env Vars (similar to geminiService)
@@ -29,17 +30,19 @@ const firebaseConfig = {
 
 // Initialize Firebase
 let app;
-let auth;
+let auth: firebase.auth.Auth | undefined;
 let db;
 let googleProvider;
 
 try {
     // Only initialize if config is present to avoid crashing on empty envs during dev
     if (firebaseConfig.apiKey) {
-        app = initializeApp(firebaseConfig);
-        auth = getAuth(app);
+        // Use compat initialization
+        app = firebase.initializeApp(firebaseConfig);
+        auth = firebase.auth();
+        // Use modular firestore with compat app
         db = getFirestore(app);
-        googleProvider = new GoogleAuthProvider();
+        googleProvider = new firebase.auth.GoogleAuthProvider();
     } else {
         console.warn("Firebase config missing. Auth and DB features will be disabled.");
     }

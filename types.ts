@@ -30,6 +30,7 @@ export interface SavedSearch {
   id?: string;
   userId: string;
   timestamp: number;
+  title?: string;
   propertyDetails: PropertyDetails;
   results: SearchResponse;
 }

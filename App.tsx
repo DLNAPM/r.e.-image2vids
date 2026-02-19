@@ -4,7 +4,7 @@ import { PropertyDetails, ImageFile, SearchResponse, SavedSearch } from './types
 import { searchPropertyVideos, generatePromotionalVideo } from './services/geminiService';
 import { auth, db, googleProvider } from './services/firebase';
 import firebase from 'firebase/compat/app';
-import { collection, addDoc, query, where, orderBy, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, query, where, orderBy, getDocs, Timestamp, deleteDoc, updateDoc, doc } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
 import ImageUpload from './components/ImageUpload';
 import VideoResult from './components/VideoResult';
@@ -29,6 +29,10 @@ function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [historyList, setHistoryList] = useState<SavedSearch[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Edit History State
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitleValue, setEditTitleValue] = useState('');
 
   // Video Generation State
   const [generatingVideo, setGeneratingVideo] = useState(false);
@@ -123,6 +127,7 @@ function App() {
       const searchData: SavedSearch = {
         userId: user.uid,
         timestamp: Date.now(),
+        title: address.street, // Default title
         propertyDetails,
         results
       };
@@ -149,6 +154,7 @@ function App() {
     if (!user) return;
     setLoadingHistory(true);
     setShowHistory(true);
+    setEditingId(null); 
     try {
       let items: SavedSearch[] = [];
 
@@ -166,8 +172,6 @@ function App() {
         // LocalStorage Fallback
         const existing = localStorage.getItem('re_app_searches');
         const allSearches: SavedSearch[] = existing ? JSON.parse(existing) : [];
-        // Filter by user ID (in case we switch guests, though normally localstorage is browser-bound)
-        // For guest mode, we just show all if matches or if isAnonymous
         items = allSearches
             .filter(s => s.userId === user.uid)
             .sort((a, b) => b.timestamp - a.timestamp);
@@ -188,6 +192,73 @@ function App() {
     setShowHistory(false);
     setSaveStatus('saved'); // Already saved
   };
+
+  // --- Deletion and Editing Logic ---
+
+  const handleDeleteSearch = async (itemId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent loading the search
+    if (!window.confirm("Are you sure you want to delete this saved search?")) return;
+
+    try {
+        if (db && !itemId.startsWith('local-')) {
+            await deleteDoc(doc(db, 'searches', itemId));
+        } else {
+            const existing = localStorage.getItem('re_app_searches');
+            if (existing) {
+                const searches: SavedSearch[] = JSON.parse(existing);
+                const updated = searches.filter(s => s.id !== itemId);
+                localStorage.setItem('re_app_searches', JSON.stringify(updated));
+            }
+        }
+        // Update UI
+        setHistoryList(prev => prev.filter(item => item.id !== itemId));
+    } catch (err) {
+        console.error("Error deleting search:", err);
+        alert("Failed to delete search.");
+    }
+  };
+
+  const startEditing = (item: SavedSearch, e: React.MouseEvent) => {
+      e.stopPropagation();
+      setEditingId(item.id!);
+      setEditTitleValue(item.title || item.propertyDetails.street);
+  };
+
+  const cancelEditing = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setEditingId(null);
+      setEditTitleValue('');
+  };
+
+  const saveEdit = async (itemId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+        if (db && !itemId.startsWith('local-')) {
+             await updateDoc(doc(db, 'searches', itemId), { title: editTitleValue });
+        } else {
+            const existing = localStorage.getItem('re_app_searches');
+            if (existing) {
+                const searches: SavedSearch[] = JSON.parse(existing);
+                const index = searches.findIndex(s => s.id === itemId);
+                if (index !== -1) {
+                    searches[index].title = editTitleValue;
+                    localStorage.setItem('re_app_searches', JSON.stringify(searches));
+                }
+            }
+        }
+        
+        // Update local state
+        setHistoryList(prev => prev.map(item => 
+            item.id === itemId ? { ...item, title: editTitleValue } : item
+        ));
+        setEditingId(null);
+    } catch (err) {
+        console.error("Error updating title:", err);
+        alert("Failed to update title.");
+    }
+  };
+
+  // --- End Deletion and Editing Logic ---
 
   const generatePDF = () => {
     if (!results) return;
@@ -651,21 +722,66 @@ function App() {
                     ) : (
                         <div className="divide-y divide-slate-100">
                             {historyList.map((item) => (
-                                <div key={item.id} className="p-4 hover:bg-slate-50 transition-colors flex justify-between items-center group">
-                                    <div>
-                                        <h4 className="font-medium text-slate-800">
-                                            {item.propertyDetails.street}
-                                        </h4>
-                                        <p className="text-xs text-slate-500">
-                                            {item.propertyDetails.city}, {item.propertyDetails.state} • {new Date(item.timestamp).toLocaleDateString()}
-                                        </p>
+                                <div key={item.id} onClick={() => restoreSearch(item)} className="p-4 hover:bg-slate-50 transition-colors flex justify-between items-center group cursor-pointer">
+                                    <div className="flex-1 min-w-0 pr-4">
+                                        {editingId === item.id ? (
+                                            <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                                                <input
+                                                    type="text"
+                                                    value={editTitleValue}
+                                                    onChange={(e) => setEditTitleValue(e.target.value)}
+                                                    className="w-full px-2 py-1 text-sm border border-indigo-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                                    autoFocus
+                                                />
+                                                <button onClick={(e) => saveEdit(item.id!, e)} className="text-green-600 hover:text-green-800 p-1">
+                                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                    </svg>
+                                                </button>
+                                                <button onClick={cancelEditing} className="text-red-500 hover:text-red-700 p-1">
+                                                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                    </svg>
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <div className="flex items-center gap-2">
+                                                    <h4 className="font-medium text-slate-800 truncate">
+                                                        {item.title || item.propertyDetails.street}
+                                                    </h4>
+                                                    <button 
+                                                        onClick={(e) => startEditing(item, e)}
+                                                        className="text-slate-400 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                                                        title="Edit Title"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                                <p className="text-xs text-slate-500 truncate">
+                                                    {item.propertyDetails.city}, {item.propertyDetails.state} • {new Date(item.timestamp).toLocaleDateString()}
+                                                </p>
+                                            </>
+                                        )}
                                     </div>
-                                    <button 
-                                        onClick={() => restoreSearch(item)}
-                                        className="text-sm text-indigo-600 hover:text-indigo-800 font-medium opacity-0 group-hover:opacity-100 transition-opacity"
-                                    >
-                                        Load Results
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button 
+                                            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium opacity-0 group-hover:opacity-100 transition-opacity"
+                                        >
+                                            Load
+                                        </button>
+                                        <button 
+                                            onClick={(e) => handleDeleteSearch(item.id!, e)}
+                                            className="text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-full hover:bg-red-50"
+                                            title="Delete Search"
+                                        >
+                                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                         </div>

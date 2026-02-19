@@ -1,0 +1,5 @@
+{
+  "name": "R.E.-Image2Vidz",
+  "description": "A real estate utility that searches for video tours and listing clips based on property address, MLS number, and uploaded photos.",
+  "requestFramePermissions": []
+}

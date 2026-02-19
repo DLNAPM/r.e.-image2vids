@@ -54,6 +54,8 @@ function App() {
     setError(null);
     if (auth && googleProvider) {
       try {
+        // Force account selection to allow switching accounts
+        googleProvider.setCustomParameters({ prompt: 'select_account' });
         await auth.signInWithPopup(googleProvider);
       } catch (err: any) {
         setError("Login failed: " + err.message);

@@ -2,14 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { PropertyDetails, ImageFile, SearchResponse, SavedSearch } from './types';
 import { searchPropertyVideos, generatePromotionalVideo } from './services/geminiService';
 import { auth, db, googleProvider } from './services/firebase';
-import firebase from 'firebase/app';
+import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
+import { collection, addDoc, query, where, orderBy, getDocs, Timestamp } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
 import ImageUpload from './components/ImageUpload';
 import VideoResult from './components/VideoResult';
 
 function App() {
   // Auth State
-  const [user, setUser] = useState<firebase.User | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   
   // State for form inputs
   const [address, setAddress] = useState({ street: '', city: '', state: '', zip: '' });
@@ -37,7 +38,7 @@ function App() {
   // Auth Listener
   useEffect(() => {
     if (auth) {
-      const unsubscribe = auth.onAuthStateChanged((currentUser) => {
+      const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
         setUser(currentUser);
       });
       return () => unsubscribe();
@@ -50,7 +51,7 @@ function App() {
       return;
     }
     try {
-      await auth.signInWithPopup(googleProvider);
+      await signInWithPopup(auth, googleProvider);
     } catch (err: any) {
       setError("Login failed: " + err.message);
     }
@@ -58,7 +59,7 @@ function App() {
 
   const handleLogout = async () => {
     if (auth) {
-      await auth.signOut();
+      await signOut(auth);
       setHistoryList([]);
     }
   };
@@ -114,7 +115,7 @@ function App() {
         results
       };
 
-      await db.collection('searches').add(searchData);
+      await addDoc(collection(db, 'searches'), searchData);
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 3000);
     } catch (err) {
@@ -128,11 +129,12 @@ function App() {
     setLoadingHistory(true);
     setShowHistory(true);
     try {
-      const querySnapshot = await db.collection('searches')
-        .where('userId', '==', user.uid)
-        .orderBy('timestamp', 'desc')
-        .get();
-        
+      const q = query(
+        collection(db, 'searches'),
+        where('userId', '==', user.uid),
+        orderBy('timestamp', 'desc')
+      );
+      const querySnapshot = await getDocs(q);
       const items: SavedSearch[] = [];
       querySnapshot.forEach((doc) => {
         items.push({ id: doc.id, ...doc.data() } as SavedSearch);

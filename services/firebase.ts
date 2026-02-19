@@ -1,30 +1,19 @@
-import firebase from "firebase/app";
-import "firebase/auth";
-import "firebase/firestore";
+import { initializeApp } from "firebase/app";
+import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
-// Helper to safely retrieve Env Vars
+// Helper to safely retrieve Env Vars (similar to geminiService)
 const getEnvVar = (key: string): string => {
-  // Vite requires variables to be prefixed with VITE_ to be exposed to the client
-  const viteKey = `VITE_${key}`;
-
-  // 1. Check import.meta.env (Vite standard)
-  if ((import.meta as any).env) {
-    // Check for VITE_ prefix first (most common in Vite/Render)
-    if ((import.meta as any).env[viteKey]) {
-      return (import.meta as any).env[viteKey];
-    }
-    // Check for non-prefixed (if manually configured in vite.config.js define)
-    if ((import.meta as any).env[key]) {
-      return (import.meta as any).env[key];
-    }
+  // 1. Process.env
+  if (typeof process !== 'undefined' && process.env?.[key]) {
+    return process.env[key];
   }
-
-  // 2. Check process.env (Fallback for other build systems or if process is polyfilled with data)
-  if (typeof process !== 'undefined' && process.env) {
-     if (process.env[viteKey]) return process.env[viteKey];
-     if (process.env[key]) return process.env[key];
+  // 2. Vite import.meta.env
+  const metaEnv = (import.meta as any).env;
+  if (metaEnv) {
+    if (metaEnv[`VITE_${key}`]) return metaEnv[`VITE_${key}`];
+    if (metaEnv[key]) return metaEnv[key];
   }
-
   return "";
 };
 
@@ -40,28 +29,22 @@ const firebaseConfig = {
 
 // Initialize Firebase
 let app;
-let auth: firebase.auth.Auth | undefined;
-let db: firebase.firestore.Firestore | undefined;
-let googleProvider: firebase.auth.GoogleAuthProvider | undefined;
+let auth;
+let db;
+let googleProvider;
 
 try {
-    // Check if critical config is present
+    // Only initialize if config is present to avoid crashing on empty envs during dev
     if (firebaseConfig.apiKey) {
-        if (!firebase.apps.length) {
-            app = firebase.initializeApp(firebaseConfig);
-        } else {
-            app = firebase.app();
-        }
-        
-        auth = firebase.auth();
-        db = firebase.firestore();
-        googleProvider = new firebase.auth.GoogleAuthProvider();
+        app = initializeApp(firebaseConfig);
+        auth = getAuth(app);
+        db = getFirestore(app);
+        googleProvider = new GoogleAuthProvider();
     } else {
-        console.warn("Firebase config missing. Auth and DB features will be disabled. Ensure VITE_FIREBASE_... environment variables are set.");
+        console.warn("Firebase config missing. Auth and DB features will be disabled.");
     }
 } catch (e) {
     console.error("Firebase Initialization Error:", e);
 }
 
 export { auth, db, googleProvider };
-export default firebase;

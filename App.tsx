@@ -1,10 +1,16 @@
-import React, { useState } from 'react';
-import { PropertyDetails, ImageFile, SearchResponse } from './types';
+import React, { useState, useEffect } from 'react';
+import { PropertyDetails, ImageFile, SearchResponse, SavedSearch } from './types';
 import { searchPropertyVideos, generatePromotionalVideo } from './services/geminiService';
+import { auth, db, googleProvider } from './services/firebase';
+import firebase from 'firebase/app';
+import { jsPDF } from 'jspdf';
 import ImageUpload from './components/ImageUpload';
 import VideoResult from './components/VideoResult';
 
 function App() {
+  // Auth State
+  const [user, setUser] = useState<firebase.User | null>(null);
+  
   // State for form inputs
   const [address, setAddress] = useState({ street: '', city: '', state: '', zip: '' });
   const [mlsNumber, setMlsNumber] = useState('');
@@ -16,11 +22,46 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<SearchResponse | null>(null);
 
-  // Help Modal State
+  // Help/History Modal State
   const [showHelp, setShowHelp] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyList, setHistoryList] = useState<SavedSearch[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Video Generation State
   const [generatingVideo, setGeneratingVideo] = useState(false);
   const [promoVideoUrl, setPromoVideoUrl] = useState<string | null>(null);
   const [videoError, setVideoError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  // Auth Listener
+  useEffect(() => {
+    if (auth) {
+      const unsubscribe = auth.onAuthStateChanged((currentUser) => {
+        setUser(currentUser);
+      });
+      return () => unsubscribe();
+    }
+  }, []);
+
+  const handleLogin = async () => {
+    if (!auth || !googleProvider) {
+      setError("Firebase not configured. Check environment variables.");
+      return;
+    }
+    try {
+      await auth.signInWithPopup(googleProvider);
+    } catch (err: any) {
+      setError("Login failed: " + err.message);
+    }
+  };
+
+  const handleLogout = async () => {
+    if (auth) {
+      await auth.signOut();
+      setHistoryList([]);
+    }
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -47,6 +88,7 @@ function App() {
     setLoading(true);
     setError(null);
     setResults(null);
+    setSaveStatus('idle');
 
     try {
       const propertyDetails: PropertyDetails = { ...address, mlsNumber };
@@ -59,6 +101,140 @@ function App() {
     }
   };
 
+  const handleSaveSearch = async () => {
+    if (!user || !results || !db) return;
+    
+    setSaveStatus('saving');
+    try {
+      const propertyDetails: PropertyDetails = { ...address, mlsNumber };
+      const searchData: SavedSearch = {
+        userId: user.uid,
+        timestamp: Date.now(),
+        propertyDetails,
+        results
+      };
+
+      await db.collection('searches').add(searchData);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    } catch (err) {
+      console.error(err);
+      setSaveStatus('error');
+    }
+  };
+
+  const loadHistory = async () => {
+    if (!user || !db) return;
+    setLoadingHistory(true);
+    setShowHistory(true);
+    try {
+      const querySnapshot = await db.collection('searches')
+        .where('userId', '==', user.uid)
+        .orderBy('timestamp', 'desc')
+        .get();
+        
+      const items: SavedSearch[] = [];
+      querySnapshot.forEach((doc) => {
+        items.push({ id: doc.id, ...doc.data() } as SavedSearch);
+      });
+      setHistoryList(items);
+    } catch (err) {
+      console.error("Error loading history:", err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const restoreSearch = (item: SavedSearch) => {
+    setAddress(item.propertyDetails);
+    setMlsNumber(item.propertyDetails.mlsNumber);
+    setResults(item.results);
+    setShowHistory(false);
+    setSaveStatus('saved'); // Already saved
+  };
+
+  const generatePDF = () => {
+    if (!results) return;
+    const doc = new jsPDF();
+    
+    // Header
+    doc.setFillColor(79, 70, 229); // Indigo 600
+    doc.rect(0, 0, 210, 20, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.text("R.E.-Image2Vidz Property Report", 10, 13);
+
+    // Property Details
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(14);
+    doc.text(`${address.street}, ${address.city}, ${address.state} ${address.zip}`, 10, 35);
+    doc.setFontSize(11);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`MLS#: ${mlsNumber}  |  Generated: ${new Date().toLocaleDateString()}`, 10, 42);
+
+    // Summary
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(12);
+    doc.text("Search Summary:", 10, 55);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(60, 60, 60);
+    const splitSummary = doc.splitTextToSize(results.summary, 190);
+    doc.text(splitSummary, 10, 62);
+
+    // Links
+    let yPos = 62 + (splitSummary.length * 5) + 10;
+    
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    doc.text(`Found Videos (${results.videos.length})`, 10, yPos);
+    yPos += 8;
+
+    if (results.videos.length === 0) {
+        doc.setFontSize(10);
+        doc.text("No videos found.", 10, yPos);
+    } else {
+        doc.setFontSize(10);
+        results.videos.forEach((video) => {
+            if (yPos > 280) {
+                doc.addPage();
+                yPos = 20;
+            }
+            doc.setTextColor(79, 70, 229);
+            doc.textWithLink(`• ${video.title}`, 10, yPos, { url: video.uri });
+            yPos += 5;
+            doc.setTextColor(100, 100, 100);
+            doc.text(`  Source: ${video.source}`, 10, yPos);
+            yPos += 8;
+        });
+    }
+
+    doc.save(`PropertyReport_${mlsNumber}.pdf`);
+  };
+
+  const handleShare = async () => {
+    if (!results) return;
+    
+    const shareData = {
+        title: `Video Search Results: ${address.street}`,
+        text: `I found ${results.videos.length} videos for ${address.street} (${address.city}).\n\nSummary: ${results.summary.substring(0, 100)}...`,
+        url: window.location.href // Or deep link if app supported routing
+    };
+
+    if (navigator.share) {
+        try {
+            await navigator.share(shareData);
+        } catch (err) {
+            console.log("Error sharing:", err);
+        }
+    } else {
+        // Fallback to email
+        const subject = encodeURIComponent(shareData.title);
+        const body = encodeURIComponent(`${shareData.text}\n\nView results in R.E.-Image2Vidz`);
+        window.location.href = `mailto:?subject=${subject}&body=${body}`;
+    }
+  };
+
   const handleReset = () => {
     setAddress({ street: '', city: '', state: '', zip: '' });
     setMlsNumber('');
@@ -66,6 +242,7 @@ function App() {
     setBackImage(null);
     setResults(null);
     setError(null);
+    setSaveStatus('idle');
   };
 
   const handleGeneratePromo = async () => {
@@ -92,12 +269,47 @@ function App() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
             </div>
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight">R.E.-Image2Vidz</h1>
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight hidden sm:block">R.E.-Image2Vidz</h1>
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight sm:hidden">R.E.</h1>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="text-sm text-slate-500 hidden sm:block">
-                Powered by Gemini
-            </div>
+          <div className="flex items-center gap-3">
+            {user ? (
+                <div className="flex items-center gap-3">
+                    <button 
+                        onClick={loadHistory}
+                        className="text-sm font-medium text-slate-600 hover:text-indigo-600 transition-colors hidden md:block"
+                    >
+                        My History
+                    </button>
+                    <div className="flex items-center gap-2 bg-slate-100 pl-3 pr-1 py-1 rounded-full">
+                        <span className="text-xs font-semibold text-slate-700 max-w-[100px] truncate">
+                            {user.displayName?.split(' ')[0]}
+                        </span>
+                        {user.photoURL ? (
+                            <img src={user.photoURL} alt="User" className="w-7 h-7 rounded-full" />
+                        ) : (
+                            <div className="w-7 h-7 rounded-full bg-indigo-500 text-white flex items-center justify-center text-xs">
+                                {user.email?.[0].toUpperCase()}
+                            </div>
+                        )}
+                    </div>
+                    <button 
+                        onClick={handleLogout}
+                        className="text-xs text-slate-500 hover:text-red-500 border-l border-slate-300 pl-3 ml-1"
+                    >
+                        Logout
+                    </button>
+                </div>
+            ) : (
+                <button
+                    onClick={handleLogin}
+                    className="flex items-center gap-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+                >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.539-6.033-5.696  c0-3.159,2.701-5.698,6.033-5.698c1.6,0,3.046,0.575,4.172,1.52l2.766-2.753C17.788,3.992,15.343,3,12.544,3  C6.925,3,2.444,7.468,2.444,12.928c0,5.462,4.481,9.932,10.1,9.932c5.838,0,9.726-4.305,9.726-9.932  c0-0.621-0.057-1.226-0.165-1.815H12.545z"/></svg>
+                    Sign In
+                </button>
+            )}
+
             <button 
                 onClick={() => setShowHelp(true)}
                 className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-600 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -276,6 +488,47 @@ function App() {
                 </div>
               ) : results ? (
                 <div className="space-y-6">
+                   {/* Actions Bar */}
+                   <div className="flex flex-wrap gap-2 justify-end">
+                        {user && (
+                            <button 
+                                onClick={handleSaveSearch}
+                                disabled={saveStatus !== 'idle'}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                                    saveStatus === 'saved' ? 'bg-green-50 text-green-700 border-green-200' : 
+                                    saveStatus === 'error' ? 'bg-red-50 text-red-700 border-red-200' :
+                                    'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                                }`}
+                            >
+                                {saveStatus === 'saved' ? (
+                                    <>
+                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                        Saved
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" /></svg>
+                                        Save
+                                    </>
+                                )}
+                            </button>
+                        )}
+                        <button 
+                            onClick={generatePDF}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white text-slate-600 border border-slate-300 hover:bg-slate-50 transition-colors"
+                        >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                            Export PDF
+                        </button>
+                        <button 
+                            onClick={handleShare}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100 transition-colors"
+                        >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+                            Share Results
+                        </button>
+                   </div>
+
                    {/* Summary Card */}
                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
                       <h3 className="text-lg font-semibold text-slate-900 mb-3">Search Summary</h3>
@@ -339,6 +592,52 @@ function App() {
                 <p>Disclaimer: This App is NOT used to spy on properties not for sale and is intended only for serious Real Estate Brokers, Agents, and Investors searching for property information.</p>
             </div>
         </footer>
+
+      {/* History Modal */}
+      {showHistory && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setShowHistory(false)}></div>
+            <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <h2 className="text-xl font-bold text-slate-900">Saved Searches</h2>
+                    <button onClick={() => setShowHistory(false)} className="text-slate-400 hover:text-slate-600">
+                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+                
+                <div className="p-0 overflow-y-auto">
+                    {loadingHistory ? (
+                        <div className="p-8 text-center text-slate-500">Loading history...</div>
+                    ) : historyList.length === 0 ? (
+                        <div className="p-8 text-center text-slate-500">No saved searches found.</div>
+                    ) : (
+                        <div className="divide-y divide-slate-100">
+                            {historyList.map((item) => (
+                                <div key={item.id} className="p-4 hover:bg-slate-50 transition-colors flex justify-between items-center group">
+                                    <div>
+                                        <h4 className="font-medium text-slate-800">
+                                            {item.propertyDetails.street}
+                                        </h4>
+                                        <p className="text-xs text-slate-500">
+                                            {item.propertyDetails.city}, {item.propertyDetails.state} • {new Date(item.timestamp).toLocaleDateString()}
+                                        </p>
+                                    </div>
+                                    <button 
+                                        onClick={() => restoreSearch(item)}
+                                        className="text-sm text-indigo-600 hover:text-indigo-800 font-medium opacity-0 group-hover:opacity-100 transition-opacity"
+                                    >
+                                        Load Results
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+      )}
 
       {/* Help Modal */}
       {showHelp && (

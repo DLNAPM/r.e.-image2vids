@@ -25,3 +25,11 @@ export interface ImageFile {
   base64: string;
   mimeType: string;
 }
+
+export interface SavedSearch {
+  id?: string;
+  userId: string;
+  timestamp: number;
+  propertyDetails: PropertyDetails;
+  results: SearchResponse;
+}

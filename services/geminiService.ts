@@ -39,28 +39,36 @@ export const searchPropertyVideos = async (
   const modelId = 'gemini-3-pro-image-preview'; 
 
   const prompt = `
-    I am looking for video tours, listing videos, or social media clips for a specific real estate property.
+    I need you to find ACTUAL, PLAYABLE VIDEO CONTENT for the following real estate property. 
+    Do not provide links to generic listing pages unless they explicitly contain a video tour.
     
-    Property Details:
+    Target Property:
     Address: ${details.street}, ${details.city}, ${details.state} ${details.zip}
     MLS Number: ${details.mlsNumber}
     
-    ${frontImage || backImage ? "Attached are images of the property." : ""}
+    ${frontImage || backImage ? "I have attached images of the property. Use them to visually confirm the property in video thumbnails if possible." : ""}
     
-    Please search the web specifically for ALL available videos related to this property. 
+    STRICT SEARCH REQUIREMENTS:
+    1. Search specifically for VIDEO TOURS, WALKTHROUGHS, and DRONE FOOTAGE.
+    2. Prioritize these platforms:
+       - YouTube (Look for specific video URLs, NOT channels)
+       - Vimeo
+       - Facebook/Instagram/TikTok (Specific posts with video)
+       - Matterport 3D Tours
+       - Real Estate Brokerage sites (ONLY if the snippet confirms a "Video Tour" or "Virtual Tour" is present)
     
-    PRIORITIZATION ORDER - Please look for and list videos in this order of importance:
-    1. YouTube Videos (Listing tours, walkthroughs, Shorts)
-    2. Instagram Stories, Reels, or Posts (Real estate agent content)
-    3. Listings on Real Estate Websites (Zillow, Redfin, Realtor.com, etc.) containing video tours.
-    
-    I want you to find as many relevant video links as possible.
+    3. EXCLUDE:
+       - Dead or broken links.
+       - "Sold" pages that have removed the media.
+       - Generic "homes for sale" search result pages.
+       - YouTube Channels (e.g. /channel/ or /user/) - I want specific videos.
     
     OUTPUT INSTRUCTIONS:
-    1. Provide a helpful summary of what you found.
-    2. If you find videos, explicitly list the FULL URL of every video or listing page in the text.
+    - Provide a concise summary of the video content found.
+    - When listing links, ensure they are high-confidence video links.
+    - If you find a YouTube link, verify it is a /watch?v= link or a /shorts/ link, not a channel page.
     
-    If you absolutely cannot find any VIDEO content related to this specific address and MLS number, state that clearly.
+    If no specific video content is found, state "No video tours found" clearly.
   `;
 
   // Build request parts dynamically
@@ -107,14 +115,32 @@ export const searchPropertyVideos = async (
             
             // Validate URL structure and protocol
             if (!cleanUri.startsWith("http")) return;
-            new URL(cleanUri); // throws if invalid
+            const urlObj = new URL(cleanUri); 
+            const hostname = urlObj.hostname.toLowerCase();
+
+            // --- ENHANCED FILTERING ---
+            
+            // 1. Filter out YouTube Channels/Users
+            if (hostname.includes("youtube.com") || hostname.includes("youtu.be")) {
+                if (cleanUri.includes("/channel/") || cleanUri.includes("/user/") || cleanUri.includes("/c/")) {
+                    return; // Skip channels
+                }
+            }
+
+            // 2. Filter out generic search pages or map pages if they sneak in
+            if (cleanUri.includes("google.com/maps") || cleanUri.includes("google.com/search")) {
+                return;
+            }
+
+            // 3. Filter out common non-video listing aggregators unless deep linked (heuristic)
+            // Many of these just list the MLS text without video.
+            // We rely on the model's grounding, but if we see a root domain or generic search, skip it.
+            if (urlObj.pathname === "/" || urlObj.pathname.length < 2) {
+                 // Likely a homepage, skip
+                 return;
+            }
 
             if (!uniqueVideos.has(cleanUri)) {
-                let hostname = "unknown";
-                try {
-                    hostname = new URL(cleanUri).hostname;
-                } catch (e) {}
-                
                 uniqueVideos.set(cleanUri, {
                     title: title,
                     uri: cleanUri,
@@ -140,7 +166,9 @@ export const searchPropertyVideos = async (
     const textMatches = summary.match(urlRegex) || [];
     
     textMatches.forEach(match => {
-        addVideo(match);
+        // We give these a generic title since we don't have the anchor text easily
+        // unless we parse the markdown more deeply.
+        addVideo(match, "Mentioned Video Link");
     });
 
     const videos = Array.from(uniqueVideos.values());

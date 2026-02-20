@@ -143,6 +143,24 @@ export const searchPropertyVideos = async (
                  return;
             }
 
+            // 3b. Filter out known "Search Result" pages which are rarely specific videos
+            // These often just show a map or a list of homes.
+            if (hostname.includes("zillow.com") && (cleanUri.includes("/homes/") || cleanUri.includes("_rb"))) {
+                 // zillow.com/homes/Address... is usually a map search
+                 // zillow.com/homedetails/ is the actual listing (which might have video)
+                 if (!cleanUri.includes("/homedetails/")) return;
+            }
+            if (hostname.includes("realtor.com") && cleanUri.includes("-search")) {
+                 return;
+            }
+            if (hostname.includes("redfin.com") && (cleanUri.includes("/city/") || cleanUri.includes("/zipcode/"))) {
+                 return;
+            }
+            if (hostname.includes("trulia.com") && (cleanUri.includes("/for_sale/") || cleanUri.includes("/sold/"))) {
+                 // Trulia for_sale pages are lists. Specific homes are usually /p/
+                 if (!cleanUri.includes("/p/")) return;
+            }
+
             // 4. Filter out "How To" or "Verify" videos that are likely unrelated
             if (lowerTitle.includes("how to verify") || lowerTitle.includes("verify youtube channel")) {
                 return;

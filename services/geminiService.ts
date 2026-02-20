@@ -58,10 +58,12 @@ export const searchPropertyVideos = async (
        - Real Estate Brokerage sites (ONLY if the snippet confirms a "Video Tour" or "Virtual Tour" is present)
     
     3. EXCLUDE:
-       - Dead or broken links.
+       - Dead or broken links (e.g. "This video isn't available anymore").
        - "Sold" pages that have removed the media.
        - Generic "homes for sale" search result pages.
        - YouTube Channels (e.g. /channel/ or /user/) - I want specific videos.
+       - "How To" videos (e.g. "How to verify YouTube channel", "How to buy a house").
+       - Real Estate websites that just list the property details without a video player.
     
     OUTPUT INSTRUCTIONS:
     - Provide a concise summary of the video content found.
@@ -117,6 +119,7 @@ export const searchPropertyVideos = async (
             if (!cleanUri.startsWith("http")) return;
             const urlObj = new URL(cleanUri); 
             const hostname = urlObj.hostname.toLowerCase();
+            const lowerTitle = title.toLowerCase();
 
             // --- ENHANCED FILTERING ---
             
@@ -138,6 +141,11 @@ export const searchPropertyVideos = async (
             if (urlObj.pathname === "/" || urlObj.pathname.length < 2) {
                  // Likely a homepage, skip
                  return;
+            }
+
+            // 4. Filter out "How To" or "Verify" videos that are likely unrelated
+            if (lowerTitle.includes("how to verify") || lowerTitle.includes("verify youtube channel")) {
+                return;
             }
 
             if (!uniqueVideos.has(cleanUri)) {

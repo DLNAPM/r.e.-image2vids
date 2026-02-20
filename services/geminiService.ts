@@ -1,3 +1,4 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { PropertyDetails, SearchResponse, ImageFile } from "../types";
 
@@ -38,7 +39,7 @@ export const searchPropertyVideos = async (
   const modelId = 'gemini-3-pro-image-preview'; 
 
   const prompt = `
-    I am looking for video tours, listing videos, or YouTube clips for a specific real estate property.
+    I am looking for video tours, listing videos, or social media clips for a specific real estate property.
     
     Property Details:
     Address: ${details.street}, ${details.city}, ${details.state} ${details.zip}
@@ -47,7 +48,11 @@ export const searchPropertyVideos = async (
     ${frontImage || backImage ? "Attached are images of the property." : ""}
     
     Please search the web specifically for ALL available videos related to this property. 
-    Look for YouTube links, Vimeo links, Zillow/Redfin video tours, or real estate agency video pages.
+    
+    PRIORITIZATION ORDER - Please look for and list videos in this order of importance:
+    1. YouTube Videos (Listing tours, walkthroughs, Shorts)
+    2. Instagram Stories, Reels, or Posts (Real estate agent content)
+    3. Listings on Real Estate Websites (Zillow, Redfin, Realtor.com, etc.) containing video tours.
     
     I want you to find as many relevant video links as possible.
     

@@ -171,9 +171,10 @@ function App() {
         let sharedSnapshot: any = { empty: true };
         if (user.email) {
             try {
+                const normalizedUserEmail = user.email.toLowerCase();
                 const sharedQuery = query(
                     collection(db, 'searches'),
-                    where('sharedWith', 'array-contains', user.email)
+                    where('sharedWith', 'array-contains', normalizedUserEmail)
                 );
                 sharedSnapshot = await getDocs(sharedQuery);
             } catch (e) {
@@ -228,28 +229,26 @@ function App() {
       const email = prompt("Enter the Google Email address to share this search with:");
       if (!email) return;
       
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      const normalizedEmail = email.toLowerCase().trim();
+      
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
           alert("Please enter a valid email address.");
           return;
       }
 
       try {
           const docRef = doc(db, 'searches', item.id!);
-          // We need to get the current doc to append to array safely, or use arrayUnion if we imported it
-          // Since we didn't import arrayUnion, let's just read-modify-write or use the update with array spread if we trust local state
-          // Better: use arrayUnion. Let's import it dynamically or just use the pattern we have.
-          // We will use the existing item state to update.
           
           const currentShared = item.sharedWith || [];
-          if (currentShared.includes(email)) {
+          if (currentShared.includes(normalizedEmail)) {
               alert("User already has access.");
               return;
           }
           
-          const updatedShared = [...currentShared, email];
+          const updatedShared = [...currentShared, normalizedEmail];
           await updateDoc(docRef, { sharedWith: updatedShared });
           
-          alert(`Shared successfully with ${email}`);
+          alert(`Shared successfully with ${normalizedEmail}`);
           // Update local state
           setHistoryList(prev => prev.map(s => s.id === item.id ? { ...s, sharedWith: updatedShared } : s));
 

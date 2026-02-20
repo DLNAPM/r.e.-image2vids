@@ -29,6 +29,7 @@ function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [historyList, setHistoryList] = useState<SavedSearch[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   // Edit History State
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -155,6 +156,7 @@ function App() {
   const loadHistory = async () => {
     if (!user) return;
     setLoadingHistory(true);
+    setHistoryError(null);
     setShowHistory(true);
     setEditingId(null); 
     try {
@@ -172,13 +174,21 @@ function App() {
         if (user.email) {
             try {
                 const normalizedUserEmail = user.email.toLowerCase();
+                console.log("Attempting to fetch shared searches for:", normalizedUserEmail);
+                
                 const sharedQuery = query(
                     collection(db, 'searches'),
                     where('sharedWith', 'array-contains', normalizedUserEmail)
                 );
                 sharedSnapshot = await getDocs(sharedQuery);
-            } catch (e) {
-                console.warn("Shared search query failed (likely missing index or permission):", e);
+                console.log("Shared searches found:", sharedSnapshot.size);
+            } catch (e: any) {
+                console.error("Shared search query failed:", e);
+                if (e.code === 'permission-denied') {
+                    setHistoryError("Could not load shared searches. Database permissions may need updating.");
+                } else {
+                    setHistoryError("Failed to load some shared searches.");
+                }
             }
         }
 
@@ -799,6 +809,11 @@ function App() {
                 </div>
                 
                 <div className="p-0 overflow-y-auto">
+                    {historyError && (
+                        <div className="bg-amber-50 p-3 text-xs text-amber-700 border-b border-amber-100 text-center">
+                            {historyError}
+                        </div>
+                    )}
                     {loadingHistory ? (
                         <div className="p-8 text-center text-slate-500">Loading history...</div>
                     ) : historyList.length === 0 ? (

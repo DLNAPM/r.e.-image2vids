@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /searches/{searchId} {
+      // Allow creation if authenticated
+      allow create: if request.auth != null;
+      
+      // Allow read/write if owner OR if email is in sharedWith
+      // Note: We lowercase the email in the app, so we assume token email is also checked against that.
+      // Ideally we'd lowercase the token email too but rules don't support .lower() easily on all versions.
+      allow read, update, delete: if request.auth != null && (
+        request.auth.uid == resource.data.userId || 
+        (resource.data.sharedWith is list && resource.data.sharedWith.hasAny([request.auth.token.email.lower()])) ||
+        (resource.data.sharedWith is list && resource.data.sharedWith.hasAny([request.auth.token.email]))
+      );
+    }
+  }
+}

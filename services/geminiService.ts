@@ -179,7 +179,41 @@ export const searchPropertyVideos = async (
         addVideo(match, "Mentioned Video Link");
     });
 
-    const videos = Array.from(uniqueVideos.values());
+    let videos = Array.from(uniqueVideos.values());
+
+    // --- AVAILABILITY CHECK (YouTube Only) ---
+    // We can check if a YouTube video is available by hitting its oEmbed endpoint.
+    // If it returns 404 or 401, the video is likely unavailable.
+    // We do this in parallel for performance.
+    
+    const checkAvailability = async (video: any) => {
+        const isYouTube = video.source.includes("youtube.com") || video.source.includes("youtu.be");
+        if (!isYouTube) return true; // Assume non-YouTube links are valid for now (harder to check without CORS issues)
+
+        try {
+            // YouTube oEmbed endpoint supports CORS and JSONP, but fetch usually works for status checks.
+            // We use 'no-cors' mode if needed, but actually we need the status code.
+            // YouTube oEmbed header allows ALL origins.
+            const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(video.uri)}&format=json`;
+            const res = await fetch(oembedUrl, { method: 'GET' });
+            
+            if (res.status === 404 || res.status === 401 || res.status === 403) {
+                console.log(`Filtering unavailable YouTube video: ${video.uri}`);
+                return false;
+            }
+            return true;
+        } catch (e) {
+            // Network error or CORS block (though YouTube oEmbed is usually open).
+            // If we can't check, we default to keeping it, or we could be strict.
+            // Let's keep it to avoid false positives on network glitches.
+            return true;
+        }
+    };
+
+    // Filter videos
+    const availabilityResults = await Promise.all(videos.map(v => checkAvailability(v)));
+    videos = videos.filter((_, index) => availabilityResults[index]);
+
     const hasResults = videos.length > 0;
 
     return {

@@ -161,22 +161,24 @@ function App() {
       let items: SavedSearch[] = [];
 
       if (db) {
-        // 1. Query owned searches
+        // 1. Query owned searches - Remove orderBy to avoid index requirements
         const ownedQuery = query(
             collection(db, 'searches'),
-            where('userId', '==', user.uid),
-            orderBy('timestamp', 'desc')
+            where('userId', '==', user.uid)
         );
         
-        // 2. Query shared searches (if user has email)
+        // 2. Query shared searches (if user has email) - Remove orderBy
         let sharedSnapshot: any = { empty: true };
         if (user.email) {
-            const sharedQuery = query(
-                collection(db, 'searches'),
-                where('sharedWith', 'array-contains', user.email),
-                orderBy('timestamp', 'desc')
-            );
-            sharedSnapshot = await getDocs(sharedQuery);
+            try {
+                const sharedQuery = query(
+                    collection(db, 'searches'),
+                    where('sharedWith', 'array-contains', user.email)
+                );
+                sharedSnapshot = await getDocs(sharedQuery);
+            } catch (e) {
+                console.warn("Shared search query failed (likely missing index or permission):", e);
+            }
         }
 
         const ownedSnapshot = await getDocs(ownedQuery);
@@ -196,6 +198,7 @@ function App() {
             });
         }
 
+        // Sort in memory
         items = Array.from(uniqueItems.values()).sort((a, b) => b.timestamp - a.timestamp);
 
       } else {

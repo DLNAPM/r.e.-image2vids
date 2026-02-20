@@ -2,17 +2,32 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /searches/{searchId} {
-      // Allow creation if authenticated
-      allow create: if request.auth != null;
       
-      // Allow read/write if owner OR if email is in sharedWith
-      // Note: We lowercase the email in the app, so we assume token email is also checked against that.
-      // Ideally we'd lowercase the token email too but rules don't support .lower() easily on all versions.
-      allow read, update, delete: if request.auth != null && (
-        request.auth.uid == resource.data.userId || 
-        (resource.data.sharedWith is list && resource.data.sharedWith.hasAny([request.auth.token.email.lower()])) ||
-        (resource.data.sharedWith is list && resource.data.sharedWith.hasAny([request.auth.token.email]))
-      );
+      // Helper function to check if user is owner
+      function isOwner() {
+        return request.auth.uid == resource.data.userId;
+      }
+      
+      // Helper function to check if user is in shared list
+      // We check both the raw email and a lowercase version to be safe.
+      // Note: request.auth.token.email is available for Google Auth.
+      function isShared() {
+        return resource.data.sharedWith is list && (
+          resource.data.sharedWith.hasAny([request.auth.token.email]) ||
+          resource.data.sharedWith.hasAny([request.auth.token.email.lower()])
+        );
+      }
+
+      // Allow creating a new search if you are authenticated
+      // and you set yourself as the owner.
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+
+      // Allow reading (list/get) if you are owner OR it is shared with you
+      allow read: if request.auth != null && (isOwner() || isShared());
+
+      // Allow update/delete ONLY if you are the owner
+      // (Recipients should not be able to delete the owner's search)
+      allow update, delete: if request.auth != null && isOwner();
     }
   }
 }

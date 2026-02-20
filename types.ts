@@ -33,4 +33,5 @@ export interface SavedSearch {
   title?: string;
   propertyDetails: PropertyDetails;
   results: SearchResponse;
+  sharedWith?: string[]; // Array of email addresses
 }

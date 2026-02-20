@@ -161,15 +161,43 @@ function App() {
       let items: SavedSearch[] = [];
 
       if (db) {
-        const q = query(
+        // 1. Query owned searches
+        const ownedQuery = query(
             collection(db, 'searches'),
             where('userId', '==', user.uid),
             orderBy('timestamp', 'desc')
         );
-        const querySnapshot = await getDocs(q);
-        querySnapshot.forEach((doc) => {
-            items.push({ id: doc.id, ...doc.data() } as SavedSearch);
+        
+        // 2. Query shared searches (if user has email)
+        let sharedSnapshot: any = { empty: true };
+        if (user.email) {
+            const sharedQuery = query(
+                collection(db, 'searches'),
+                where('sharedWith', 'array-contains', user.email),
+                orderBy('timestamp', 'desc')
+            );
+            sharedSnapshot = await getDocs(sharedQuery);
+        }
+
+        const ownedSnapshot = await getDocs(ownedQuery);
+        
+        // Merge and deduplicate
+        const uniqueItems = new Map();
+        
+        ownedSnapshot.forEach((doc) => {
+            uniqueItems.set(doc.id, { id: doc.id, ...doc.data() } as SavedSearch);
         });
+        
+        if (!sharedSnapshot.empty) {
+            sharedSnapshot.forEach((doc: any) => {
+                if (!uniqueItems.has(doc.id)) {
+                    uniqueItems.set(doc.id, { id: doc.id, ...doc.data() } as SavedSearch);
+                }
+            });
+        }
+
+        items = Array.from(uniqueItems.values()).sort((a, b) => b.timestamp - a.timestamp);
+
       } else {
         // LocalStorage Fallback
         const existing = localStorage.getItem('re_app_searches');
@@ -185,6 +213,47 @@ function App() {
     } finally {
       setLoadingHistory(false);
     }
+  };
+
+  const handleShareSearchAccess = async (item: SavedSearch, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!db || item.id?.startsWith('local-')) {
+          alert("Sharing is only available when logged in and online.");
+          return;
+      }
+      
+      const email = prompt("Enter the Google Email address to share this search with:");
+      if (!email) return;
+      
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          alert("Please enter a valid email address.");
+          return;
+      }
+
+      try {
+          const docRef = doc(db, 'searches', item.id!);
+          // We need to get the current doc to append to array safely, or use arrayUnion if we imported it
+          // Since we didn't import arrayUnion, let's just read-modify-write or use the update with array spread if we trust local state
+          // Better: use arrayUnion. Let's import it dynamically or just use the pattern we have.
+          // We will use the existing item state to update.
+          
+          const currentShared = item.sharedWith || [];
+          if (currentShared.includes(email)) {
+              alert("User already has access.");
+              return;
+          }
+          
+          const updatedShared = [...currentShared, email];
+          await updateDoc(docRef, { sharedWith: updatedShared });
+          
+          alert(`Shared successfully with ${email}`);
+          // Update local state
+          setHistoryList(prev => prev.map(s => s.id === item.id ? { ...s, sharedWith: updatedShared } : s));
+
+      } catch (err) {
+          console.error("Error sharing search:", err);
+          alert("Failed to share search.");
+      }
   };
 
   const restoreSearch = (item: SavedSearch) => {
@@ -780,20 +849,33 @@ function App() {
                                         )}
                                     </div>
                                     <div className="flex items-center gap-2">
+                                        {item.userId === user.uid && (
+                                            <button 
+                                                onClick={(e) => handleShareSearchAccess(item, e)}
+                                                className="text-slate-400 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-full hover:bg-indigo-50"
+                                                title="Share with Email"
+                                            >
+                                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                                                </svg>
+                                            </button>
+                                        )}
                                         <button 
                                             className="text-sm text-indigo-600 hover:text-indigo-800 font-medium opacity-0 group-hover:opacity-100 transition-opacity"
                                         >
                                             Load
                                         </button>
-                                        <button 
-                                            onClick={(e) => handleDeleteSearch(item.id!, e)}
-                                            className="text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-full hover:bg-red-50"
-                                            title="Delete Search"
-                                        >
-                                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                            </svg>
-                                        </button>
+                                        {item.userId === user.uid && (
+                                            <button 
+                                                onClick={(e) => handleDeleteSearch(item.id!, e)}
+                                                className="text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-full hover:bg-red-50"
+                                                title="Delete Search"
+                                            >
+                                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                </svg>
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             ))}

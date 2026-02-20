@@ -354,6 +354,13 @@ function App() {
     setSaveStatus('idle');
   };
 
+  const handleDeleteVideo = (index: number) => {
+    if (!results) return;
+    const updatedVideos = [...results.videos];
+    updatedVideos.splice(index, 1);
+    setResults({ ...results, videos: updatedVideos });
+  };
+
   const handleGeneratePromo = async () => {
     setGeneratingVideo(true);
     setVideoError(null);
@@ -656,7 +663,11 @@ function App() {
                      {results.found && results.videos.length > 0 ? (
                        <div className="grid gap-4">
                          {results.videos.map((video, idx) => (
-                           <VideoResult key={idx} video={video} />
+                           <VideoResult 
+                             key={idx} 
+                             video={video} 
+                             onDelete={() => handleDeleteVideo(idx)}
+                           />
                          ))}
                        </div>
                      ) : (

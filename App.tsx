@@ -191,6 +191,7 @@ function App() {
 
       const searchData: SavedSearch = {
         userId: user.uid,
+        ownerEmail: user.email,
         timestamp: Date.now(),
         title: address.street, // Default title
         propertyDetails,
@@ -1012,7 +1013,9 @@ function App() {
                                                 <p className="text-xs text-slate-500 truncate">
                                                     {item.propertyDetails.city}, {item.propertyDetails.state} • {new Date(item.timestamp).toLocaleDateString()}
                                                 </p>
-                                                {item.sharedWith && item.sharedWith.length > 0 && (
+                                                
+                                                {/* Owner View: Show who I shared with */}
+                                                {item.userId === user.uid && item.sharedWith && item.sharedWith.length > 0 && (
                                                     <div className="mt-1 flex flex-wrap gap-1">
                                                         <span className="text-[10px] text-slate-400 uppercase font-semibold mr-1">Shared with:</span>
                                                         {item.sharedWith.map((email, idx) => (
@@ -1020,6 +1023,16 @@ function App() {
                                                                 {email}
                                                             </span>
                                                         ))}
+                                                    </div>
+                                                )}
+
+                                                {/* Recipient View: Show who shared it */}
+                                                {item.userId !== user.uid && (
+                                                    <div className="mt-1 flex flex-wrap gap-1">
+                                                        <span className="text-[10px] text-slate-400 uppercase font-semibold mr-1">Shared by:</span>
+                                                        <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded-full border border-indigo-100">
+                                                            {item.ownerEmail || 'Unknown Owner'}
+                                                        </span>
                                                     </div>
                                                 )}
                                             </>

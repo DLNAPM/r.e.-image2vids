@@ -35,6 +35,7 @@ export interface SerializableImage {
 export interface SavedSearch {
   id?: string;
   userId: string;
+  ownerEmail?: string;
   timestamp: number;
   title?: string;
   propertyDetails: PropertyDetails;

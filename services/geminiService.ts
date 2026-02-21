@@ -206,25 +206,52 @@ export const searchPropertyVideos = async (
     
     const checkAvailability = async (video: any) => {
         const isYouTube = video.source.includes("youtube.com") || video.source.includes("youtu.be");
-        if (!isYouTube) return true; // Assume non-YouTube links are valid for now (harder to check without CORS issues)
+        if (!isYouTube) return true; // Assume non-YouTube links are valid for now
 
         try {
-            // YouTube oEmbed endpoint supports CORS and JSONP, but fetch usually works for status checks.
-            // We use 'no-cors' mode if needed, but actually we need the status code.
-            // YouTube oEmbed header allows ALL origins.
             const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(video.uri)}&format=json`;
-            const res = await fetch(oembedUrl, { method: 'GET' });
+            
+            // Set a timeout for the check
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+
+            const res = await fetch(oembedUrl, { 
+                method: 'GET',
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
             
             if (res.status === 404 || res.status === 401 || res.status === 403) {
-                console.log(`Filtering unavailable YouTube video: ${video.uri}`);
+                console.warn(`Filtering unavailable YouTube video (Status ${res.status}): ${video.uri}`);
                 return false;
             }
+
+            if (!res.ok) {
+                 // Other non-200 errors (500, etc) -> safer to exclude if we want to be strict, 
+                 // or include if we think it's temporary. 
+                 // Given the user complaint, let's be strict.
+                 console.warn(`Filtering YouTube video due to error status ${res.status}: ${video.uri}`);
+                 return false;
+            }
+
+            // Optional: Check if title indicates unavailability (rare for oEmbed to return 200 with bad title, but possible)
+            try {
+                const data = await res.json();
+                if (data.title === "video unavailable") {
+                     return false;
+                }
+            } catch (jsonError) {
+                // If JSON parsing fails but status was 200, it might be a weird response. Keep it?
+            }
+
             return true;
         } catch (e) {
-            // Network error or CORS block (though YouTube oEmbed is usually open).
-            // If we can't check, we default to keeping it, or we could be strict.
-            // Let's keep it to avoid false positives on network glitches.
-            return true;
+            // Network error, timeout, or CORS block.
+            // To fix "Users are still getting invalid clips", we should probably exclude these 
+            // as a valid video usually responds to oEmbed.
+            console.warn(`Filtering YouTube video due to verification error: ${video.uri}`, e);
+            return false;
         }
     };
 

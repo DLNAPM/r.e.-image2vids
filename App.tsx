@@ -105,6 +105,54 @@ function App() {
       return;
     }
 
+    // MLS Validation
+    const validateMls = (input: string): string | null => {
+        const upper = input.toUpperCase();
+        
+        // 1. Check for space between MLS# and number (e.g. "MLS# 123456")
+        if (/^MLS#\s+\d+/.test(upper)) {
+            return "MLS Number cannot have a space after 'MLS#'";
+        }
+        
+        // Extract just the number part
+        // Remove "MLS#" prefix if present to check the digits
+        const numberPart = input.replace(/^MLS#\s*/i, '').trim();
+        
+        // Ensure there are digits to check
+        if (!/^\d+$/.test(numberPart)) {
+             // If it contains non-digits and isn't just "MLS#...", it might be invalid generally, 
+             // but let's focus on the specific rules requested.
+             // If it's empty, it's caught by missingFields.
+        }
+
+        // 2. Check for repeating numbers (e.g. 000000)
+        if (/^(\d)\1+$/.test(numberPart) && numberPart.length > 1) {
+            return "MLS Number cannot be repeating digits (e.g. 000000)";
+        }
+        
+        // 3. Check for incremental numbers (e.g. 123456)
+        const isIncremental = (str: string) => {
+            if (str.length < 2) return false;
+            const digits = str.split('').map(Number);
+            for (let i = 1; i < digits.length; i++) {
+                if (digits[i] !== digits[i-1] + 1) return false;
+            }
+            return true;
+        };
+
+        if (isIncremental(numberPart)) {
+            return "MLS Number cannot be sequential digits (e.g. 123456)";
+        }
+        
+        return null;
+    };
+
+    const mlsError = validateMls(mlsNumber);
+    if (mlsError) {
+        setError(mlsError);
+        return;
+    }
+
     setLoading(true);
     setError(null);
     setResults(null);

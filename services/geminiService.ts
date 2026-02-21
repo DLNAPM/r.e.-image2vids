@@ -39,38 +39,32 @@ export const searchPropertyVideos = async (
   const modelId = 'gemini-3-pro-image-preview'; 
 
   const prompt = `
-    I need you to find ACTUAL, PLAYABLE VIDEO CONTENT for the following real estate property. 
-    Do not provide links to generic listing pages unless they explicitly contain a video tour.
+    I need you to find the OFFICIAL LISTING AGENT'S WEBSITE and ACTUAL VIDEO CONTENT for the following real estate property.
     
     Target Property:
     Address: ${details.street}, ${details.city}, ${details.state} ${details.zip}
     MLS Number: ${details.mlsNumber}
     
-    ${frontImage || backImage ? "I have attached images of the property. Use them to visually confirm the property in video thumbnails if possible." : ""}
+    ${frontImage || backImage ? "I have attached images. Use them to confirm the property." : ""}
     
-    STRICT SEARCH REQUIREMENTS:
-    1. Search specifically for VIDEO TOURS, WALKTHROUGHS, and DRONE FOOTAGE.
-    2. Prioritize these platforms:
-       - YouTube (Look for specific video URLs, NOT channels)
-       - Vimeo
-       - Facebook/Instagram/TikTok (Specific posts with video)
-       - Matterport 3D Tours
-       - Real Estate Brokerage sites (ONLY if the snippet confirms a "Video Tour" or "Virtual Tour" is present)
+    SEARCH REQUIREMENTS:
+    1. **FIRST RESULT (Mandatory)**: The Official Listing Page or Listing Agent's Website.
+       - A direct link to the property details on the brokerage site (e.g. Coldwell Banker, Compass, Re/Max) or a major portal (Zillow/Redfin/Realtor) if the brokerage site isn't found.
+       - Title this "Official Listing Page".
+       
+    2. **SUBSEQUENT RESULTS**: Direct links to VIDEO TOURS, WALKTHROUGHS, or DRONE FOOTAGE.
+       - Platforms: YouTube, Vimeo, Facebook (video posts), Instagram (Reels/video), TikTok, Matterport 3D Tours.
+       - Virtual Tours hosted on dedicated domains (e.g. tours.property.com) are also acceptable.
     
     3. EXCLUDE:
-       - Dead or broken links (e.g. "This video isn't available anymore").
-       - "Sold" pages that have removed the media.
-       - Generic "homes for sale" search result pages.
-       - YouTube Channels (e.g. /channel/ or /user/) - I want specific videos.
-       - "How To" videos (e.g. "How to verify YouTube channel", "How to buy a house").
-       - Real Estate websites that just list the property details without a video player.
+       - Generic search results (e.g. "homes for sale in [City]").
+       - Dead links.
+       - "Sold" pages if possible (unless they still have the video).
     
     OUTPUT INSTRUCTIONS:
-    - Provide a concise summary of the video content found.
-    - When listing links, ensure they are high-confidence video links.
-    - If you find a YouTube link, verify it is a /watch?v= link or a /shorts/ link, not a channel page.
-    
-    If no specific video content is found, state "No video tours found" clearly.
+    - Provide a concise summary.
+    - List the Official Listing Page as the first link.
+    - List Video links afterwards.
   `;
 
   // Build request parts dynamically
@@ -108,112 +102,122 @@ export const searchPropertyVideos = async (
     const summary = response.text || "No summary provided.";
     
     // Deduplicate videos by URI
-    const uniqueVideos = new Map();
+    const uniqueLinks = new Map();
 
-    const addVideo = (uri: string, title: string = "Video Link") => {
+    const processLink = (uri: string, title: string = "Link") => {
         try {
-            // Basic cleanup of the URI (remove trailing punctuation often captured by regex like . or ,)
+            // Basic cleanup
             let cleanUri = uri.trim().replace(/[.,;:)]+$/, "");
             
-            // Validate URL structure and protocol
+            // Validate URL
             if (!cleanUri.startsWith("http")) return;
             const urlObj = new URL(cleanUri); 
             const hostname = urlObj.hostname.toLowerCase();
             const lowerTitle = title.toLowerCase();
 
-            // --- ENHANCED FILTERING ---
+            // --- FILTERING ---
             
             // 1. Filter out YouTube Channels/Users
             if (hostname.includes("youtube.com") || hostname.includes("youtu.be")) {
                 if (cleanUri.includes("/channel/") || cleanUri.includes("/user/") || cleanUri.includes("/c/")) {
-                    return; // Skip channels
+                    return; 
                 }
             }
 
-            // 2. Filter out generic search pages or map pages if they sneak in
+            // 2. Filter out generic search/map pages
             if (cleanUri.includes("google.com/maps") || cleanUri.includes("google.com/search")) {
                 return;
             }
 
-            // 3. Filter out common non-video listing aggregators unless deep linked (heuristic)
-            // Many of these just list the MLS text without video.
-            // We rely on the model's grounding, but if we see a root domain or generic search, skip it.
+            // 3. Filter out root domains or short paths
             if (urlObj.pathname === "/" || urlObj.pathname.length < 2) {
-                 // Likely a homepage, skip
                  return;
             }
 
-            // 3b. Filter out known "Search Result" pages which are rarely specific videos
-            // These often just show a map or a list of homes.
-            if (hostname.includes("zillow.com") && (cleanUri.includes("/homes/") || cleanUri.includes("_rb"))) {
-                 // zillow.com/homes/Address... is usually a map search
-                 // zillow.com/homedetails/ is the actual listing (which might have video)
-                 if (!cleanUri.includes("/homedetails/")) return;
-            }
-            if (hostname.includes("realtor.com") && cleanUri.includes("-search")) {
-                 return;
-            }
-            if (hostname.includes("redfin.com") && (cleanUri.includes("/city/") || cleanUri.includes("/zipcode/"))) {
-                 return;
-            }
-            if (hostname.includes("trulia.com") && (cleanUri.includes("/for_sale/") || cleanUri.includes("/sold/"))) {
-                 // Trulia for_sale pages are lists. Specific homes are usually /p/
-                 if (!cleanUri.includes("/p/")) return;
-            }
+            // 4. Filter out known "Search Result" pages
+            if (hostname.includes("zillow.com") && (cleanUri.includes("/homes/") || cleanUri.includes("_rb")) && !cleanUri.includes("/homedetails/")) return;
+            if (hostname.includes("realtor.com") && cleanUri.includes("-search")) return;
+            if (hostname.includes("redfin.com") && (cleanUri.includes("/city/") || cleanUri.includes("/zipcode/"))) return;
+            if (hostname.includes("trulia.com") && (cleanUri.includes("/for_sale/") || cleanUri.includes("/sold/")) && !cleanUri.includes("/p/")) return;
 
-            // 4. Filter out "How To" or "Verify" videos that are likely unrelated
+            // 5. Filter out "How To" videos
             if (lowerTitle.includes("how to verify") || lowerTitle.includes("verify youtube channel")) {
                 return;
             }
 
-            if (!uniqueVideos.has(cleanUri)) {
-                uniqueVideos.set(cleanUri, {
+            if (!uniqueLinks.has(cleanUri)) {
+                uniqueLinks.set(cleanUri, {
                     title: title,
                     uri: cleanUri,
                     source: hostname,
                 });
             }
         } catch (e) {
-            // Invalid URL, skip
+            // Invalid URL
         }
     };
 
-    // 1. Extract from Grounding Metadata (High confidence sources)
+    // 1. Extract from Grounding Metadata
     const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     chunks.forEach(chunk => {
         if (chunk.web?.uri) {
-            addVideo(chunk.web.uri, chunk.web.title || "Source Link");
+            processLink(chunk.web.uri, chunk.web.title || "Source Link");
         }
     });
 
-    // 2. Extract from Text Response (Fallback for when model mentions links but grounding misses them)
-    // Regex to find http/https URLs
+    // 2. Extract from Text Response
     const urlRegex = /(https?:\/\/[^\s<>"']+)/g;
     const textMatches = summary.match(urlRegex) || [];
-    
     textMatches.forEach(match => {
-        // We give these a generic title since we don't have the anchor text easily
-        // unless we parse the markdown more deeply.
-        addVideo(match, "Mentioned Video Link");
+        processLink(match, "Mentioned Link");
     });
 
-    let videos = Array.from(uniqueVideos.values());
+    const allLinks = Array.from(uniqueLinks.values());
+
+    // --- CATEGORIZATION & SORTING ---
+    // Requirement: First link = Listing Agent Website. Rest = ONLY Video links.
+
+    let listingPage: any = null;
+    const videoLinks: any[] = [];
+
+    const isVideoPlatform = (source: string, uri: string) => {
+        const s = source.toLowerCase();
+        const u = uri.toLowerCase();
+        return s.includes('youtube') || s.includes('youtu.be') || s.includes('vimeo') || 
+               s.includes('tiktok') || s.includes('facebook') || s.includes('instagram') || 
+               s.includes('matterport') || u.includes('tour') || u.includes('video');
+    };
+
+    for (const link of allLinks) {
+        if (isVideoPlatform(link.source, link.uri)) {
+            videoLinks.push(link);
+        } else {
+            // It's a potential listing page.
+            // We only want the FIRST one we found (which usually corresponds to the first one mentioned/found).
+            if (!listingPage) {
+                listingPage = link;
+                listingPage.title = "Official Listing Page"; // Enforce title
+            }
+            // Discard subsequent non-video links per requirement "rest of the Links ONLY Video links"
+        }
+    }
+
+    // Construct final list
+    let finalLinks = [];
+    if (listingPage) {
+        finalLinks.push(listingPage);
+    }
+    finalLinks = [...finalLinks, ...videoLinks];
 
     // --- AVAILABILITY CHECK (YouTube Only) ---
-    // We can check if a YouTube video is available by hitting its oEmbed endpoint.
-    // If it returns 404 or 401, the video is likely unavailable.
-    // We do this in parallel for performance.
-    
     const checkAvailability = async (video: any) => {
         const isYouTube = video.source.includes("youtube.com") || video.source.includes("youtu.be");
-        if (!isYouTube) return true; // Assume non-YouTube links are valid for now
+        if (!isYouTube) return true; 
 
         try {
             const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(video.uri)}&format=json`;
-            
-            // Set a timeout for the check
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+            const timeoutId = setTimeout(() => controller.abort(), 3000); 
 
             const res = await fetch(oembedUrl, { 
                 method: 'GET',
@@ -228,43 +232,30 @@ export const searchPropertyVideos = async (
             }
 
             if (!res.ok) {
-                 // Other non-200 errors (500, etc) -> safer to exclude if we want to be strict, 
-                 // or include if we think it's temporary. 
-                 // Given the user complaint, let's be strict.
                  console.warn(`Filtering YouTube video due to error status ${res.status}: ${video.uri}`);
                  return false;
             }
 
-            // Optional: Check if title indicates unavailability (rare for oEmbed to return 200 with bad title, but possible)
             try {
                 const data = await res.json();
-                if (data.title === "video unavailable") {
-                     return false;
-                }
-            } catch (jsonError) {
-                // If JSON parsing fails but status was 200, it might be a weird response. Keep it?
-            }
+                if (data.title === "video unavailable") return false;
+            } catch (jsonError) {}
 
             return true;
         } catch (e) {
-            // Network error, timeout, or CORS block.
-            // To fix "Users are still getting invalid clips", we should probably exclude these 
-            // as a valid video usually responds to oEmbed.
             console.warn(`Filtering YouTube video due to verification error: ${video.uri}`, e);
             return false;
         }
     };
 
     // Filter videos
-    const availabilityResults = await Promise.all(videos.map(v => checkAvailability(v)));
-    videos = videos.filter((_, index) => availabilityResults[index]);
-
-    const hasResults = videos.length > 0;
+    const availabilityResults = await Promise.all(finalLinks.map(v => checkAvailability(v)));
+    finalLinks = finalLinks.filter((_, index) => availabilityResults[index]);
 
     return {
       summary,
-      videos,
-      found: hasResults
+      videos: finalLinks,
+      found: finalLinks.length > 0
     };
 
   } catch (error) {

@@ -39,7 +39,8 @@ export const searchPropertyVideos = async (
   const modelId = 'gemini-3-pro-image-preview'; 
 
   const prompt = `
-    I need you to find the OFFICIAL LISTING AGENT'S WEBSITE and ACTUAL VIDEO CONTENT for the following real estate property.
+    I need you to find ACTUAL, PLAYABLE VIDEO CONTENT for the following real estate property.
+    The goal is to find video tours, walkthroughs, and drone footage that visually match the property.
     
     Target Property:
     Address: ${details.street}, ${details.city}, ${details.state} ${details.zip}
@@ -48,24 +49,19 @@ export const searchPropertyVideos = async (
     ${frontImage || backImage ? "I have attached images of the property. You MUST prioritize videos where the content VISUALLY MATCHES these images. The video should feature the specific house shown in the uploaded photos." : ""}
     
     SEARCH REQUIREMENTS:
-    1. **FIRST RESULT (Mandatory)**: The Official Listing Page or Listing Agent's Website.
-       - A direct link to the property details on the brokerage site (e.g. Coldwell Banker, Compass, Re/Max) or a major portal (Zillow/Redfin/Realtor) if the brokerage site isn't found.
-       - Title this "Official Listing Page".
-       
-    2. **SUBSEQUENT RESULTS**: Direct links to VIDEO TOURS, WALKTHROUGHS, or DRONE FOOTAGE.
-       - Platforms: YouTube, Vimeo, Facebook (video posts), Instagram (Reels/video), TikTok, Matterport 3D Tours.
-       - Virtual Tours hosted on dedicated domains (e.g. tours.property.com) are also acceptable.
-       - **VISUAL MATCHING**: Ensure the videos found actually depict the property shown in the uploaded images.
+    1. **FIND VIDEO CLIPS**: Search specifically for video tours, walkthroughs, open house videos, and drone footage.
+    2. **PLATFORMS**: Prioritize YouTube, Vimeo, Facebook (video posts), Instagram (Reels/video), TikTok, and Matterport 3D Tours.
+    3. **VISUAL MATCHING**: Ensure the videos found actually depict the property shown in the uploaded images.
     
-    3. EXCLUDE:
-       - Generic search results (e.g. "homes for sale in [City]").
-       - Dead links.
-       - "Sold" pages if possible (unless they still have the video).
+    EXCLUDE:
+    - Generic "homes for sale" search result pages.
+    - Standard listing pages that ONLY have photos (unless they have an embedded video player).
+    - Dead or broken links.
+    - "How to" videos or generic real estate advice.
     
     OUTPUT INSTRUCTIONS:
-    - Provide a concise summary.
-    - List the Official Listing Page as the first link.
-    - List Video links afterwards.
+    - Provide a concise summary of the videos found.
+    - List the video links clearly.
   `;
 
   // Build request parts dynamically
@@ -105,7 +101,7 @@ export const searchPropertyVideos = async (
     // Deduplicate videos by URI
     const uniqueLinks = new Map();
 
-    const processLink = (uri: string, title: string = "Link") => {
+    const processLink = (uri: string, title: string = "Video Link") => {
         try {
             // Basic cleanup
             let cleanUri = uri.trim().replace(/[.,;:)]+$/, "");
@@ -176,10 +172,10 @@ export const searchPropertyVideos = async (
     const allLinks = Array.from(uniqueLinks.values());
 
     // --- CATEGORIZATION & SORTING ---
-    // Requirement: First link = Listing Agent Website. Rest = ONLY Video links.
-
-    let listingPage: any = null;
+    // We want to prioritize VIDEO platforms.
+    
     const videoLinks: any[] = [];
+    const otherLinks: any[] = []; // Fallback for potential listing pages that might have video
 
     const isVideoPlatform = (source: string, uri: string) => {
         const s = source.toLowerCase();
@@ -193,22 +189,12 @@ export const searchPropertyVideos = async (
         if (isVideoPlatform(link.source, link.uri)) {
             videoLinks.push(link);
         } else {
-            // It's a potential listing page.
-            // We only want the FIRST one we found (which usually corresponds to the first one mentioned/found).
-            if (!listingPage) {
-                listingPage = link;
-                listingPage.title = "Official Listing Page"; // Enforce title
-            }
-            // Discard subsequent non-video links per requirement "rest of the Links ONLY Video links"
+            otherLinks.push(link);
         }
     }
 
-    // Construct final list
-    let finalLinks = [];
-    if (listingPage) {
-        finalLinks.push(listingPage);
-    }
-    finalLinks = [...finalLinks, ...videoLinks];
+    // Combine, putting high-confidence video platforms first
+    let finalLinks = [...videoLinks, ...otherLinks];
 
     // --- AVAILABILITY CHECK (YouTube Only) ---
     const checkAvailability = async (video: any) => {

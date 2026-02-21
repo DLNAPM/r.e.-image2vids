@@ -45,7 +45,7 @@ export const searchPropertyVideos = async (
     Address: ${details.street}, ${details.city}, ${details.state} ${details.zip}
     MLS Number: ${details.mlsNumber}
     
-    ${frontImage || backImage ? "I have attached images. Use them to confirm the property." : ""}
+    ${frontImage || backImage ? "I have attached images of the property. You MUST prioritize videos where the content VISUALLY MATCHES these images. The video should feature the specific house shown in the uploaded photos." : ""}
     
     SEARCH REQUIREMENTS:
     1. **FIRST RESULT (Mandatory)**: The Official Listing Page or Listing Agent's Website.
@@ -55,6 +55,7 @@ export const searchPropertyVideos = async (
     2. **SUBSEQUENT RESULTS**: Direct links to VIDEO TOURS, WALKTHROUGHS, or DRONE FOOTAGE.
        - Platforms: YouTube, Vimeo, Facebook (video posts), Instagram (Reels/video), TikTok, Matterport 3D Tours.
        - Virtual Tours hosted on dedicated domains (e.g. tours.property.com) are also acceptable.
+       - **VISUAL MATCHING**: Ensure the videos found actually depict the property shown in the uploaded images.
     
     3. EXCLUDE:
        - Generic search results (e.g. "homes for sale in [City]").

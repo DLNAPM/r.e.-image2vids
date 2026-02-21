@@ -127,12 +127,28 @@ function App() {
     setSaveStatus('saving');
     try {
       const propertyDetails: PropertyDetails = { ...address, mlsNumber };
+      
+      // Prepare images for saving (convert to serializable format)
+      const frontImageData = frontImage ? {
+          base64: frontImage.base64,
+          mimeType: frontImage.mimeType,
+          name: frontImage.file?.name || 'Front Image'
+      } : undefined;
+
+      const backImageData = backImage ? {
+          base64: backImage.base64,
+          mimeType: backImage.mimeType,
+          name: backImage.file?.name || 'Back Image'
+      } : undefined;
+
       const searchData: SavedSearch = {
         userId: user.uid,
         timestamp: Date.now(),
         title: address.street, // Default title
         propertyDetails,
-        results
+        results,
+        frontImage: frontImageData,
+        backImage: backImageData
       };
 
       if (db) {
@@ -272,6 +288,30 @@ function App() {
     setAddress(item.propertyDetails);
     setMlsNumber(item.propertyDetails.mlsNumber);
     setResults(item.results);
+    
+    // Restore Images
+    if (item.frontImage) {
+        setFrontImage({
+            file: new File([], item.frontImage.name || 'Front Image', { type: item.frontImage.mimeType }), // Dummy file object
+            preview: `data:${item.frontImage.mimeType};base64,${item.frontImage.base64}`,
+            base64: item.frontImage.base64,
+            mimeType: item.frontImage.mimeType
+        });
+    } else {
+        setFrontImage(null);
+    }
+
+    if (item.backImage) {
+        setBackImage({
+            file: new File([], item.backImage.name || 'Back Image', { type: item.backImage.mimeType }), // Dummy file object
+            preview: `data:${item.backImage.mimeType};base64,${item.backImage.base64}`,
+            base64: item.backImage.base64,
+            mimeType: item.backImage.mimeType
+        });
+    } else {
+        setBackImage(null);
+    }
+
     setShowHistory(false);
     setSaveStatus('saved'); // Already saved
   };
@@ -862,6 +902,16 @@ function App() {
                                                 <p className="text-xs text-slate-500 truncate">
                                                     {item.propertyDetails.city}, {item.propertyDetails.state} • {new Date(item.timestamp).toLocaleDateString()}
                                                 </p>
+                                                {item.sharedWith && item.sharedWith.length > 0 && (
+                                                    <div className="mt-1 flex flex-wrap gap-1">
+                                                        <span className="text-[10px] text-slate-400 uppercase font-semibold mr-1">Shared with:</span>
+                                                        {item.sharedWith.map((email, idx) => (
+                                                            <span key={idx} className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded-full border border-indigo-100">
+                                                                {email}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </>
                                         )}
                                     </div>

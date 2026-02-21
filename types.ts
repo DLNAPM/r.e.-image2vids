@@ -26,6 +26,12 @@ export interface ImageFile {
   mimeType: string;
 }
 
+export interface SerializableImage {
+  base64: string;
+  mimeType: string;
+  name?: string;
+}
+
 export interface SavedSearch {
   id?: string;
   userId: string;
@@ -34,4 +40,6 @@ export interface SavedSearch {
   propertyDetails: PropertyDetails;
   results: SearchResponse;
   sharedWith?: string[]; // Array of email addresses
+  frontImage?: SerializableImage;
+  backImage?: SerializableImage;
 }

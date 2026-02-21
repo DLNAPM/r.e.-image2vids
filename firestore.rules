@@ -9,24 +9,21 @@ service cloud.firestore {
       }
       
       // Helper function to check if user is in shared list
-      // We check both the raw email and a lowercase version to be safe.
-      // Note: request.auth.token.email is available for Google Auth.
+      // We use 'in' operator which is cleaner for list membership
       function isShared() {
         return resource.data.sharedWith is list && (
-          resource.data.sharedWith.hasAny([request.auth.token.email]) ||
-          resource.data.sharedWith.hasAny([request.auth.token.email.lower()])
+          (request.auth.token.email in resource.data.sharedWith) ||
+          (request.auth.token.email.lower() in resource.data.sharedWith)
         );
       }
 
       // Allow creating a new search if you are authenticated
-      // and you set yourself as the owner.
       allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
 
       // Allow reading (list/get) if you are owner OR it is shared with you
       allow read: if request.auth != null && (isOwner() || isShared());
 
       // Allow update/delete ONLY if you are the owner
-      // (Recipients should not be able to delete the owner's search)
       allow update, delete: if request.auth != null && isOwner();
     }
   }

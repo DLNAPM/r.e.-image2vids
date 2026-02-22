@@ -207,7 +207,7 @@ export const searchPropertyVideos = async (
         try {
             const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(video.uri)}&format=json`;
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3000); 
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // Increased to 5 seconds
 
             const res = await fetch(oembedUrl, { 
                 method: 'GET',
@@ -222,8 +222,9 @@ export const searchPropertyVideos = async (
             }
 
             if (!res.ok) {
-                 console.warn(`Filtering YouTube video due to error status ${res.status}: ${video.uri}`);
-                 return false;
+                 // Other errors (500) might be temporary. Let's keep it to be safe.
+                 console.warn(`YouTube verification returned status ${res.status}, but keeping video: ${video.uri}`);
+                 return true;
             }
 
             try {
@@ -233,8 +234,11 @@ export const searchPropertyVideos = async (
 
             return true;
         } catch (e) {
-            console.warn(`Filtering YouTube video due to verification error: ${video.uri}`, e);
-            return false;
+            // Network error, timeout, or CORS block.
+            // If we can't verify, we should DEFAULT TO SHOWING IT to avoid false negatives.
+            // The user prefers seeing videos over seeing nothing.
+            console.warn(`Verification failed (network/CORS), keeping video: ${video.uri}`, e);
+            return true;
         }
     };
 

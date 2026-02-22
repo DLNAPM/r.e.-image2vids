@@ -48,6 +48,16 @@ export const searchPropertyVideos = async (
     
     ${frontImage || backImage ? "I have attached images of the property. Use them to visually confirm the property in video thumbnails if possible." : ""}
     
+    SEARCH STRATEGY:
+    - You MUST use the Google Search tool.
+    - Perform specific searches for:
+      1. "${details.street} ${details.city} ${details.state} video"
+      2. "${details.mlsNumber} video tour"
+      3. "${details.street} YouTube"
+      4. "${details.street} virtual tour"
+      ${frontImage ? `5. Search for videos matching the visual content of the attached front image on YouTube.\n      6. Search for virtual tours matching the visual content of the attached front image.` : ""}
+      ${backImage ? `7. Search for videos matching the visual content of the attached back image on YouTube.\n      8. Search for virtual tours matching the visual content of the attached back image.` : ""}
+    
     STRICT SEARCH REQUIREMENTS:
     1. Search specifically for VIDEO TOURS, WALKTHROUGHS, and DRONE FOOTAGE.
     2. Prioritize these platforms:

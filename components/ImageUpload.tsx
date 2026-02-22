@@ -17,17 +17,44 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ label, image, onImageChange, 
     if (!file.type.startsWith('image/')) return;
 
     const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result as string;
-      // Split to get pure base64 for API
-      const base64 = result.split(',')[1];
-      
-      onImageChange({
-        file,
-        preview: result,
-        base64,
-        mimeType: file.type
-      });
+    reader.onloadend = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        
+        // Resize logic: Max dimension 1024px
+        const MAX_SIZE = 1024;
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height *= MAX_SIZE / width;
+            width = MAX_SIZE;
+          }
+        } else {
+          if (height > MAX_SIZE) {
+            width *= MAX_SIZE / height;
+            height = MAX_SIZE;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        
+        // Compress to JPEG with 0.8 quality
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        const base64 = dataUrl.split(',')[1];
+
+        onImageChange({
+            file,
+            preview: dataUrl, // Use the resized/compressed version for preview too
+            base64,
+            mimeType: 'image/jpeg' // Always convert to jpeg for consistency and size
+        });
+      };
+      img.src = e.target?.result as string;
     };
     reader.readAsDataURL(file);
   };

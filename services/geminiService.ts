@@ -239,13 +239,13 @@ export const searchPropertyVideos = async (
     };
 
     // Filter videos
-    const availabilityResults = await Promise.all(finalLinks.map(v => checkAvailability(v)));
-    finalLinks = finalLinks.filter((_, index) => availabilityResults[index]);
+    const availabilityResults = await Promise.all(videos.map(v => checkAvailability(v)));
+    videos = videos.filter((_, index) => availabilityResults[index]);
 
     return {
       summary,
-      videos: finalLinks,
-      found: finalLinks.length > 0
+      videos: videos,
+      found: videos.length > 0
     };
 
   } catch (error) {

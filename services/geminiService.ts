@@ -55,8 +55,8 @@ export const searchPropertyVideos = async (
       2. "${details.mlsNumber} video tour"
       3. "${details.street} YouTube"
       4. "${details.street} virtual tour"
-      ${frontImage ? `5. Search for videos matching the visual content of the attached front image on YouTube.\n      6. Search for virtual tours matching the visual content of the attached front image.` : ""}
-      ${backImage ? `7. Search for videos matching the visual content of the attached back image on YouTube.\n      8. Search for virtual tours matching the visual content of the attached back image.` : ""}
+      5. "${details.street.replace(/\bS\b/, 'South').replace(/\bDr\b/, 'Drive')} video"
+      ${frontImage ? `6. Search for videos matching the visual content of the attached front image on YouTube.` : ""}
     
     STRICT SEARCH REQUIREMENTS:
     1. Search specifically for VIDEO TOURS, WALKTHROUGHS, and DRONE FOOTAGE.
@@ -68,16 +68,12 @@ export const searchPropertyVideos = async (
        - Real Estate Brokerage sites (ONLY if the snippet confirms a "Video Tour" or "Virtual Tour" is present)
     
     3. EXCLUDE:
-       - Dead or broken links (e.g. "This video isn't available anymore").
-       - "Sold" pages that have removed the media.
        - Generic "homes for sale" search result pages.
-       - YouTube Channels (e.g. /channel/ or /user/) - I want specific videos.
-       - "How To" videos (e.g. "How to verify YouTube channel", "How to buy a house").
-       - Real Estate websites that just list the property details without a video player.
+       - "How To" videos or generic real estate advice.
     
     OUTPUT INSTRUCTIONS:
     - Provide a concise summary of the video content found.
-    - When listing links, ensure they are high-confidence video links.
+    - LIST ALL DISCOVERED VIDEO LINKS. Do not filter them out if you are unsure.
     - If you find a YouTube link, verify it is a /watch?v= link or a /shorts/ link, not a channel page.
     
     If no specific video content is found, state "No video tours found" clearly.
@@ -226,13 +222,13 @@ export const searchPropertyVideos = async (
             
             clearTimeout(timeoutId);
             
-            if (res.status === 404 || res.status === 401 || res.status === 403) {
+            if (res.status === 404) {
                 console.warn(`Filtering unavailable YouTube video (Status ${res.status}): ${video.uri}`);
                 return false;
             }
 
             if (!res.ok) {
-                 // Other errors (500) might be temporary. Let's keep it to be safe.
+                 // Other errors (401, 403, 500) might be API restrictions or temporary. Let's keep it to be safe.
                  console.warn(`YouTube verification returned status ${res.status}, but keeping video: ${video.uri}`);
                  return true;
             }

@@ -41,6 +41,10 @@ function App() {
   const [videoError, setVideoError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
+  // Merge State
+  const [mergeSourceId, setMergeSourceId] = useState<string | null>(null);
+  const [showMergeModal, setShowMergeModal] = useState(false);
+
   // Auth Listener
   useEffect(() => {
     if (auth) {
@@ -175,6 +179,97 @@ function App() {
     setSaveStatus('saving');
     try {
       const propertyDetails: PropertyDetails = { ...address, mlsNumber };
+      let searchTitle = address.street;
+      let existingDocId: string | null = null;
+      let existingData: SavedSearch | null = null;
+
+      // Check for existing search with same title
+      if (db) {
+          // Note: This requires an index on userId + title if the collection is large, 
+          // but for this app scale it should be fine or might need a composite index.
+          // However, 'title' is not always unique, so we just check if ANY exists.
+          const q = query(
+              collection(db, 'searches'), 
+              where('userId', '==', user.uid),
+              where('title', '==', searchTitle)
+          );
+          const snapshot = await getDocs(q);
+          if (!snapshot.empty) {
+              const doc = snapshot.docs[0];
+              existingDocId = doc.id;
+              existingData = doc.data() as SavedSearch;
+          }
+      } else {
+          const existing = localStorage.getItem('re_app_searches');
+          if (existing) {
+              const searches: SavedSearch[] = JSON.parse(existing);
+              const found = searches.find(s => s.userId === user.uid && s.title === searchTitle);
+              if (found) {
+                  existingDocId = found.id || null;
+                  existingData = found;
+              }
+          }
+      }
+
+      if (existingData && existingDocId) {
+          // Prompt User
+          const shouldMerge = window.confirm(
+              `A search with the name "${searchTitle}" already exists.\n\n` +
+              `Click OK to MERGE these new results with the existing saved search.\n` +
+              `Click Cancel to save this as a NEW search with a different name.`
+          );
+
+          if (shouldMerge) {
+              // MERGE LOGIC
+              const oldVideos = existingData.results.videos || [];
+              const newVideos = results.videos || [];
+              
+              // Deduplicate by URI
+              const videoMap = new Map();
+              oldVideos.forEach(v => videoMap.set(v.uri, v));
+              newVideos.forEach(v => videoMap.set(v.uri, v));
+              
+              const mergedVideos = Array.from(videoMap.values());
+              
+              const updatedResults = {
+                  ...results,
+                  videos: mergedVideos,
+                  summary: results.summary // Keep new summary or merge? Usually new summary is more relevant to latest search.
+              };
+
+              // Update DB
+              if (db) {
+                  await updateDoc(doc(db, 'searches', existingDocId), {
+                      results: updatedResults,
+                      timestamp: Date.now()
+                  });
+              } else {
+                  const existing = localStorage.getItem('re_app_searches');
+                  if (existing) {
+                      const searches: SavedSearch[] = JSON.parse(existing);
+                      const idx = searches.findIndex(s => s.id === existingDocId);
+                      if (idx !== -1) {
+                          searches[idx].results = updatedResults;
+                          searches[idx].timestamp = Date.now();
+                          localStorage.setItem('re_app_searches', JSON.stringify(searches));
+                      }
+                  }
+              }
+              
+              setSaveStatus('saved');
+              setTimeout(() => setSaveStatus('idle'), 3000);
+              return; // Exit after merge
+          } else {
+              // SAVE AS NEW LOGIC
+              const newName = window.prompt("Enter a name for this new search:", `${searchTitle} (Copy)`);
+              if (!newName) {
+                  setSaveStatus('idle');
+                  return; // Cancelled
+              }
+              searchTitle = newName;
+              // Continue to standard save logic below with new title
+          }
+      }
       
       // Prepare images for saving (convert to serializable format)
       const frontImageData = frontImage ? {
@@ -193,7 +288,7 @@ function App() {
         userId: user.uid,
         ownerEmail: user.email,
         timestamp: Date.now(),
-        title: address.street, // Default title
+        title: searchTitle, // Use the determined title
         propertyDetails,
         results,
         frontImage: frontImageData,
@@ -333,7 +428,7 @@ function App() {
       }
   };
 
-  const restoreSearch = (item: SavedSearch) => {
+  const loadSearchState = (item: SavedSearch) => {
     setAddress(item.propertyDetails);
     setMlsNumber(item.propertyDetails.mlsNumber);
     setResults(item.results);
@@ -341,7 +436,7 @@ function App() {
     // Restore Images
     if (item.frontImage) {
         setFrontImage({
-            file: new File([], item.frontImage.name || 'Front Image', { type: item.frontImage.mimeType }), // Dummy file object
+            file: new File([], item.frontImage.name || 'Front Image', { type: item.frontImage.mimeType }), 
             preview: `data:${item.frontImage.mimeType};base64,${item.frontImage.base64}`,
             base64: item.frontImage.base64,
             mimeType: item.frontImage.mimeType
@@ -352,7 +447,7 @@ function App() {
 
     if (item.backImage) {
         setBackImage({
-            file: new File([], item.backImage.name || 'Back Image', { type: item.backImage.mimeType }), // Dummy file object
+            file: new File([], item.backImage.name || 'Back Image', { type: item.backImage.mimeType }), 
             preview: `data:${item.backImage.mimeType};base64,${item.backImage.base64}`,
             base64: item.backImage.base64,
             mimeType: item.backImage.mimeType
@@ -362,7 +457,109 @@ function App() {
     }
 
     setShowHistory(false);
-    setSaveStatus('saved'); // Already saved
+    setSaveStatus('saved'); 
+  };
+
+  const restoreSearch = async (item: SavedSearch) => {
+    // Check for duplicates (same title, same user)
+    if (user && item.userId === user.uid) {
+        const duplicates = historyList.filter(s => 
+            s.title === item.title && 
+            s.userId === user.uid && 
+            s.id !== item.id 
+        );
+
+        if (duplicates.length > 0) {
+            const shouldMerge = window.confirm(
+                `Found ${duplicates.length} other search(es) with the name "${item.title}".\n\n` +
+                `Do you want to MERGE them into one search and delete the duplicates?`
+            );
+
+            if (shouldMerge) {
+                try {
+                    // 1. Collect all items (current + duplicates)
+                    const allItems = [item, ...duplicates];
+                    
+                    // 2. Sort by timestamp (newest first) to determine master
+                    allItems.sort((a, b) => b.timestamp - a.timestamp);
+                    const master = allItems[0];
+                    const others = allItems.slice(1);
+
+                    // 3. Merge videos
+                    const videoMap = new Map();
+                    // Add master videos first
+                    (master.results.videos || []).forEach(v => videoMap.set(v.uri, v));
+                    // Add others
+                    others.forEach(other => {
+                        (other.results.videos || []).forEach(v => {
+                            if (!videoMap.has(v.uri)) {
+                                videoMap.set(v.uri, v);
+                            }
+                        });
+                    });
+                    
+                    const mergedVideos = Array.from(videoMap.values());
+                    const updatedResults = {
+                        ...master.results,
+                        videos: mergedVideos
+                    };
+
+                    // 4. Update Master in DB
+                    if (db && !master.id!.startsWith('local-')) {
+                        await updateDoc(doc(db, 'searches', master.id!), {
+                            results: updatedResults,
+                            timestamp: Date.now() 
+                        });
+                        
+                        // 5. Delete others
+                        for (const other of others) {
+                            if (!other.id!.startsWith('local-')) {
+                                await deleteDoc(doc(db, 'searches', other.id!));
+                            }
+                        }
+                    } else {
+                        // LocalStorage logic
+                        const existing = localStorage.getItem('re_app_searches');
+                        if (existing) {
+                            let searches: SavedSearch[] = JSON.parse(existing);
+                            // Update master
+                            const mIdx = searches.findIndex(s => s.id === master.id);
+                            if (mIdx !== -1) {
+                                searches[mIdx].results = updatedResults;
+                                searches[mIdx].timestamp = Date.now();
+                            }
+                            // Filter out others
+                            const otherIds = new Set(others.map(o => o.id));
+                            searches = searches.filter(s => !otherIds.has(s.id));
+                            localStorage.setItem('re_app_searches', JSON.stringify(searches));
+                        }
+                    }
+
+                    // 6. Update UI State
+                    setHistoryList(prev => {
+                        const otherIds = new Set(others.map(o => o.id));
+                        return prev.filter(s => !otherIds.has(s.id)).map(s => {
+                            if (s.id === master.id) {
+                                return { ...s, results: updatedResults, timestamp: Date.now() };
+                            }
+                            return s;
+                        });
+                    });
+
+                    // 7. Load Master into View
+                    const updatedMaster = { ...master, results: updatedResults };
+                    loadSearchState(updatedMaster);
+                    return;
+
+                } catch (err) {
+                    console.error("Error merging searches:", err);
+                    alert("Failed to merge searches.");
+                }
+            }
+        }
+    }
+
+    loadSearchState(item);
   };
 
   // --- Deletion and Editing Logic ---
@@ -428,6 +625,93 @@ function App() {
         console.error("Error updating title:", err);
         alert("Failed to update title.");
     }
+  };
+
+  const handleMergeClick = (itemId: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      setMergeSourceId(itemId);
+      setShowMergeModal(true);
+  };
+
+  const executeMerge = async (targetId: string) => {
+      if (!mergeSourceId || !targetId) return;
+      
+      const source = historyList.find(s => s.id === mergeSourceId);
+      const target = historyList.find(s => s.id === targetId);
+      
+      if (!source || !target) return;
+
+      if (!window.confirm(`Are you sure you want to merge "${source.title || source.propertyDetails.street}" into "${target.title || target.propertyDetails.street}"?\n\n"${source.title || source.propertyDetails.street}" will be deleted.`)) {
+          return;
+      }
+
+      try {
+          // Merge Videos
+          const videoMap = new Map();
+          (target.results.videos || []).forEach(v => videoMap.set(v.uri, v));
+          (source.results.videos || []).forEach(v => {
+              if (!videoMap.has(v.uri)) {
+                  videoMap.set(v.uri, v);
+              }
+          });
+          
+          const mergedVideos = Array.from(videoMap.values());
+          const updatedResults = {
+              ...target.results,
+              videos: mergedVideos
+          };
+
+          // Update Target
+          if (db && !target.id!.startsWith('local-')) {
+              await updateDoc(doc(db, 'searches', target.id!), {
+                  results: updatedResults,
+                  timestamp: Date.now()
+              });
+          } else {
+              // LocalStorage logic
+              const existing = localStorage.getItem('re_app_searches');
+              if (existing) {
+                  const searches: SavedSearch[] = JSON.parse(existing);
+                  const idx = searches.findIndex(s => s.id === target.id);
+                  if (idx !== -1) {
+                      searches[idx].results = updatedResults;
+                      searches[idx].timestamp = Date.now();
+                      localStorage.setItem('re_app_searches', JSON.stringify(searches));
+                  }
+              }
+          }
+
+          // Delete Source
+          if (db && !source.id!.startsWith('local-')) {
+              await deleteDoc(doc(db, 'searches', source.id!));
+          } else {
+              const existing = localStorage.getItem('re_app_searches');
+              if (existing) {
+                  const searches: SavedSearch[] = JSON.parse(existing);
+                  const updated = searches.filter(s => s.id !== source.id);
+                  localStorage.setItem('re_app_searches', JSON.stringify(updated));
+              }
+          }
+
+          // Update UI
+          setHistoryList(prev => {
+              const filtered = prev.filter(s => s.id !== source.id);
+              return filtered.map(s => {
+                  if (s.id === target.id) {
+                      return { ...s, results: updatedResults, timestamp: Date.now() };
+                  }
+                  return s;
+              });
+          });
+
+          setShowMergeModal(false);
+          setMergeSourceId(null);
+          alert("Searches merged successfully!");
+
+      } catch (err) {
+          console.error("Error merging searches:", err);
+          alert("Failed to merge searches.");
+      }
   };
 
   // --- End Deletion and Editing Logic ---
@@ -1041,6 +1325,17 @@ function App() {
                                     <div className="flex items-center gap-2">
                                         {item.userId === user.uid && (
                                             <button 
+                                                onClick={(e) => handleMergeClick(item.id!, e)}
+                                                className="text-slate-400 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-full hover:bg-indigo-50"
+                                                title="Merge with another search"
+                                            >
+                                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                                                </svg>
+                                            </button>
+                                        )}
+                                        {item.userId === user.uid && (
+                                            <button 
                                                 onClick={(e) => handleShareSearchAccess(item, e)}
                                                 className="text-slate-400 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-full hover:bg-indigo-50"
                                                 title="Share with Email"
@@ -1177,6 +1472,54 @@ function App() {
                     >
                         Close
                     </button>
+                </div>
+            </div>
+        </div>
+      )}
+      {/* Merge Modal */}
+      {showMergeModal && mergeSourceId && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setShowMergeModal(false)}></div>
+            <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[80vh]">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <h2 className="text-xl font-bold text-slate-900">Merge Search</h2>
+                    <button onClick={() => setShowMergeModal(false)} className="text-slate-400 hover:text-slate-600">
+                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+                
+                <div className="p-6 overflow-y-auto">
+                    <p className="text-sm text-slate-600 mb-4">
+                        Select a search to merge <strong>"{historyList.find(s => s.id === mergeSourceId)?.title || 'Selected Search'}"</strong> into.
+                        <br/>
+                        <span className="text-red-500 font-medium">Warning: The source search will be deleted after merging.</span>
+                    </p>
+                    
+                    <div className="space-y-2">
+                        {historyList
+                            .filter(s => s.id !== mergeSourceId && s.userId === user?.uid)
+                            .map(target => (
+                            <button
+                                key={target.id}
+                                onClick={() => executeMerge(target.id!)}
+                                className="w-full text-left p-4 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition-all group"
+                            >
+                                <div className="font-medium text-slate-900 group-hover:text-indigo-700">
+                                    {target.title || target.propertyDetails.street}
+                                </div>
+                                <div className="text-xs text-slate-500 mt-1">
+                                    {new Date(target.timestamp).toLocaleDateString()} • {target.results.videos?.length || 0} videos
+                                </div>
+                            </button>
+                        ))}
+                        {historyList.filter(s => s.id !== mergeSourceId && s.userId === user?.uid).length === 0 && (
+                            <div className="text-center text-slate-500 py-8">
+                                No other searches available to merge with.
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

@@ -73,7 +73,7 @@ export const searchPropertyVideos = async (
     
     OUTPUT INSTRUCTIONS:
     - Provide a concise summary of the video content found.
-    - LIST ALL DISCOVERED VIDEO LINKS. Do not filter them out if you are unsure.
+    - LIST ALL DISCOVERED VIDEO LINKS in PLAIN TEXT. Do not use markdown formatting for links.
     - If you find a YouTube link, verify it is a /watch?v= link or a /shorts/ link, not a channel page.
     
     If no specific video content is found, state "No video tours found" clearly.
@@ -193,14 +193,13 @@ export const searchPropertyVideos = async (
     });
 
     // 2. Extract from Text Response (Fallback for when model mentions links but grounding misses them)
-    // Regex to find http/https URLs
-    const urlRegex = /(https?:\/\/[^\s<>"']+)/g;
+    // Regex to find http/https URLs - specifically exclude markdown brackets
+    const urlRegex = /(https?:\/\/[^\s<>"'[\]()]+)/g;
     const textMatches = summary.match(urlRegex) || [];
     
     textMatches.forEach(match => {
         // We give these a generic title since we don't have the anchor text easily
-        // unless we parse the markdown more deeply.
-        addVideo(match, "Mentioned Video Link");
+        addVideo(match, "Found in Summary");
     });
 
     let videos = Array.from(uniqueVideos.values());

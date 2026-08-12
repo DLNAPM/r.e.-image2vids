@@ -9,6 +9,22 @@ import { jsPDF } from 'jspdf';
 import ImageUpload from './components/ImageUpload';
 import VideoResult from './components/VideoResult';
 
+function stripUndefined<T>(obj: T): T {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(stripUndefined) as unknown as T;
+  }
+  const cleanObj: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      cleanObj[key] = stripUndefined(value);
+    }
+  }
+  return cleanObj as T;
+}
+
 function App() {
   // Auth State
   const [user, setUser] = useState<firebase.User | any | null>(null);
@@ -239,10 +255,10 @@ function App() {
 
               // Update DB
               if (db) {
-                  await updateDoc(doc(db, 'searches', existingDocId), {
+                  await updateDoc(doc(db, 'searches', existingDocId), stripUndefined({
                       results: updatedResults,
                       timestamp: Date.now()
-                  });
+                  }));
               } else {
                   const existing = localStorage.getItem('re_app_searches');
                   if (existing) {
@@ -286,7 +302,7 @@ function App() {
 
       const searchData: SavedSearch = {
         userId: user.uid,
-        ownerEmail: user.email,
+        ownerEmail: user.email || undefined,
         timestamp: Date.now(),
         title: searchTitle, // Use the determined title
         propertyDetails,
@@ -295,13 +311,15 @@ function App() {
         backImage: backImageData
       };
 
+      const cleanSearchData = stripUndefined(searchData);
+
       if (db) {
-        await addDoc(collection(db, 'searches'), searchData);
+        await addDoc(collection(db, 'searches'), cleanSearchData);
       } else {
         // LocalStorage Fallback
         const existing = localStorage.getItem('re_app_searches');
         const searches: SavedSearch[] = existing ? JSON.parse(existing) : [];
-        searches.push({ ...searchData, id: 'local-' + Date.now() });
+        searches.push({ ...cleanSearchData, id: 'local-' + Date.now() });
         localStorage.setItem('re_app_searches', JSON.stringify(searches));
       }
 
@@ -506,10 +524,10 @@ function App() {
 
                     // 4. Update Master in DB
                     if (db && !master.id!.startsWith('local-')) {
-                        await updateDoc(doc(db, 'searches', master.id!), {
+                        await updateDoc(doc(db, 'searches', master.id!), stripUndefined({
                             results: updatedResults,
                             timestamp: Date.now() 
-                        });
+                        }));
                         
                         // 5. Delete others
                         for (const other of others) {
@@ -663,10 +681,10 @@ function App() {
 
           // Update Target
           if (db && !target.id!.startsWith('local-')) {
-              await updateDoc(doc(db, 'searches', target.id!), {
+              await updateDoc(doc(db, 'searches', target.id!), stripUndefined({
                   results: updatedResults,
                   timestamp: Date.now()
-              });
+              }));
           } else {
               // LocalStorage logic
               const existing = localStorage.getItem('re_app_searches');

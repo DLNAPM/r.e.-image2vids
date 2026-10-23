@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { PropertyDetails, ImageFile, SearchResponse, SavedSearch } from './types';
+import { PropertyDetails, ImageFile, SearchResponse, SavedSearch, SearchMode } from './types';
 import { searchPropertyVideos, generatePromotionalVideo } from './services/geminiService';
 import { auth, db, googleProvider } from './services/firebase';
 import firebase from 'firebase/compat/app';
@@ -29,9 +29,14 @@ function App() {
   // Auth State
   const [user, setUser] = useState<firebase.User | any | null>(null);
   
+  // Search Mode State ('standard' = Address & MLS, 'description_images' = Description & 2 Photos)
+  const [searchMode, setSearchMode] = useState<SearchMode>('standard');
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
+
   // State for form inputs
   const [address, setAddress] = useState({ street: '', city: '', state: '', zip: '' });
   const [mlsNumber, setMlsNumber] = useState('');
+  const [description, setDescription] = useState('');
   const [frontImage, setFrontImage] = useState<ImageFile | null>(null);
   const [backImage, setBackImage] = useState<ImageFile | null>(null);
   
@@ -103,16 +108,58 @@ function App() {
     setHistoryList([]);
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setAddress(prev => ({ ...prev, [name]: value }));
+    if (name === 'description') {
+      setDescription(value);
+    } else {
+      setAddress(prev => ({ ...prev, [name]: value }));
+    }
     if (error) setError(null);
   };
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validation
+    if (searchMode === 'description_images') {
+      // Validation for 2nd Search Option
+      const missingFields: string[] = [];
+      if (!address.city.trim()) missingFields.push("City");
+      if (!address.state.trim()) missingFields.push("State");
+      if (!address.zip.trim()) missingFields.push("Zip Code");
+      if (!description.trim()) missingFields.push("Property Description");
+      if (!frontImage) missingFields.push("Image 1 (Front/Exterior)");
+      if (!backImage) missingFields.push("Image 2 (Back/Interior/Feature)");
+
+      if (missingFields.length > 0) {
+        setError(`Please fill in the following required field(s) for Option 2: ${missingFields.join(", ")}`);
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+      setResults(null);
+      setSaveStatus('idle');
+
+      try {
+        const propertyDetails: PropertyDetails = {
+          city: address.city.trim(),
+          state: address.state.trim(),
+          zip: address.zip.trim(),
+          description: description.trim(),
+          searchMode: 'description_images'
+        };
+        const response = await searchPropertyVideos(propertyDetails, frontImage, backImage);
+        setResults(response);
+      } catch (err: any) {
+        setError(err.message || "An unexpected error occurred.");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // Standard Address & MLS Search Validation
     const missingFields: string[] = [];
     if (!address.street.trim()) missingFields.push("Street Address");
     if (!address.city.trim()) missingFields.push("City");
@@ -135,15 +182,7 @@ function App() {
         }
         
         // Extract just the number part
-        // Remove "MLS#" prefix if present to check the digits
         const numberPart = input.replace(/^MLS#\s*/i, '').trim();
-        
-        // Ensure there are digits to check
-        if (!/^\d+$/.test(numberPart)) {
-             // If it contains non-digits and isn't just "MLS#...", it might be invalid generally, 
-             // but let's focus on the specific rules requested.
-             // If it's empty, it's caught by missingFields.
-        }
 
         // 2. Check for repeating numbers (e.g. 000000)
         if (/^(\d)\1+$/.test(numberPart) && numberPart.length > 1) {
@@ -179,7 +218,7 @@ function App() {
     setSaveStatus('idle');
 
     try {
-      const propertyDetails: PropertyDetails = { ...address, mlsNumber };
+      const propertyDetails: PropertyDetails = { ...address, mlsNumber, searchMode: 'standard' };
       const response = await searchPropertyVideos(propertyDetails, frontImage, backImage);
       setResults(response);
     } catch (err: any) {
@@ -194,8 +233,16 @@ function App() {
     
     setSaveStatus('saving');
     try {
-      const propertyDetails: PropertyDetails = { ...address, mlsNumber };
-      let searchTitle = address.street;
+      const propertyDetails: PropertyDetails = {
+        street: address.street.trim() || undefined,
+        city: address.city.trim(),
+        state: address.state.trim(),
+        zip: address.zip.trim(),
+        mlsNumber: mlsNumber.trim() || undefined,
+        description: description.trim() || undefined,
+        searchMode
+      };
+      let searchTitle = address.street.trim() || `${address.city}, ${address.state} ${address.zip} (Visual Search)`;
       let existingDocId: string | null = null;
       let existingData: SavedSearch | null = null;
 
@@ -447,8 +494,16 @@ function App() {
   };
 
   const loadSearchState = (item: SavedSearch) => {
-    setAddress(item.propertyDetails);
-    setMlsNumber(item.propertyDetails.mlsNumber);
+    const mode: SearchMode = item.propertyDetails.searchMode || (item.propertyDetails.description && !item.propertyDetails.street ? 'description_images' : 'standard');
+    setSearchMode(mode);
+    setAddress({
+      street: item.propertyDetails.street || '',
+      city: item.propertyDetails.city || '',
+      state: item.propertyDetails.state || '',
+      zip: item.propertyDetails.zip || ''
+    });
+    setMlsNumber(item.propertyDetails.mlsNumber || '');
+    setDescription(item.propertyDetails.description || '');
     setResults(item.results);
     
     // Restore Images
@@ -608,7 +663,7 @@ function App() {
   const startEditing = (item: SavedSearch, e: React.MouseEvent) => {
       e.stopPropagation();
       setEditingId(item.id!);
-      setEditTitleValue(item.title || item.propertyDetails.street);
+      setEditTitleValue(item.title || item.propertyDetails.street || `${item.propertyDetails.city}, ${item.propertyDetails.state}`);
   };
 
   const cancelEditing = (e: React.MouseEvent) => {
@@ -659,7 +714,10 @@ function App() {
       
       if (!source || !target) return;
 
-      if (!window.confirm(`Are you sure you want to merge "${source.title || source.propertyDetails.street}" into "${target.title || target.propertyDetails.street}"?\n\n"${source.title || source.propertyDetails.street}" will be deleted.`)) {
+      const sourceLabel = source.title || source.propertyDetails.street || `${source.propertyDetails.city}, ${source.propertyDetails.state}`;
+      const targetLabel = target.title || target.propertyDetails.street || `${target.propertyDetails.city}, ${target.propertyDetails.state}`;
+
+      if (!window.confirm(`Are you sure you want to merge "${sourceLabel}" into "${targetLabel}"?\n\n"${sourceLabel}" will be deleted.`)) {
           return;
       }
 
@@ -748,23 +806,38 @@ function App() {
     // Property Details
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(14);
-    doc.text(`${address.street}, ${address.city}, ${address.state} ${address.zip}`, 10, 35);
+    const displayLocation = address.street 
+        ? `${address.street}, ${address.city}, ${address.state} ${address.zip}` 
+        : `${address.city}, ${address.state} ${address.zip}`;
+    doc.text(displayLocation, 10, 35);
+
     doc.setFontSize(11);
     doc.setTextColor(100, 100, 100);
-    doc.text(`MLS#: ${mlsNumber}  |  Generated: ${new Date().toLocaleDateString()}`, 10, 42);
+    const metaInfo = mlsNumber 
+        ? `MLS#: ${mlsNumber}  |  Generated: ${new Date().toLocaleDateString()}` 
+        : `Mode: Description & Photos Search  |  Generated: ${new Date().toLocaleDateString()}`;
+    doc.text(metaInfo, 10, 42);
+
+    if (description) {
+        doc.setFontSize(10);
+        doc.setTextColor(80, 80, 80);
+        const splitDesc = doc.splitTextToSize(`Description: ${description}`, 190);
+        doc.text(splitDesc, 10, 48);
+    }
 
     // Summary
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(12);
-    doc.text("Search Summary:", 10, 55);
+    const summaryY = description ? 58 : 55;
+    doc.text("Search Summary:", 10, summaryY);
     
     doc.setFontSize(10);
     doc.setTextColor(60, 60, 60);
     const splitSummary = doc.splitTextToSize(results.summary, 190);
-    doc.text(splitSummary, 10, 62);
+    doc.text(splitSummary, 10, summaryY + 7);
 
     // Links
-    let yPos = 62 + (splitSummary.length * 5) + 10;
+    let yPos = summaryY + 7 + (splitSummary.length * 5) + 10;
     
     doc.setFontSize(12);
     doc.setTextColor(0, 0, 0);
@@ -790,15 +863,17 @@ function App() {
         });
     }
 
-    doc.save(`PropertyReport_${mlsNumber}.pdf`);
+    const reportFile = mlsNumber ? `PropertyReport_${mlsNumber}.pdf` : `PropertyReport_${address.city || 'Search'}.pdf`;
+    doc.save(reportFile);
   };
 
   const handleShare = async () => {
     if (!results) return;
     
+    const propTitle = address.street || `${address.city}, ${address.state} ${address.zip}`;
     const shareData = {
-        title: `Video Search Results: ${address.street}`,
-        text: `I found ${results.videos.length} videos for ${address.street} (${address.city}).\n\nSummary: ${results.summary.substring(0, 100)}...`,
+        title: `Video Search Results: ${propTitle}`,
+        text: `I found ${results.videos.length} videos for ${propTitle}.\n\nSummary: ${results.summary.substring(0, 100)}...`,
         url: window.location.href // Or deep link if app supported routing
     };
 
@@ -819,6 +894,7 @@ function App() {
   const handleReset = () => {
     setAddress({ street: '', city: '', state: '', zip: '' });
     setMlsNumber('');
+    setDescription('');
     setFrontImage(null);
     setBackImage(null);
     setResults(null);
@@ -923,106 +999,277 @@ function App() {
             {/* Left Column: Input Form */}
             <div className="lg:col-span-5 space-y-6">
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 lg:p-8">
-                <h2 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
-                  <svg className="w-5 h-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                  </svg>
-                  Property Details
-                </h2>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+                    <svg className="w-5 h-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                    </svg>
+                    Property Search
+                  </h2>
+                  {user && (
+                    <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">
+                      Logged In
+                    </span>
+                  )}
+                </div>
+
+                {/* Search Mode Tabs */}
+                <div className="bg-slate-100 p-1 rounded-xl flex items-center mb-5 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchMode('standard');
+                      if (error) setError(null);
+                    }}
+                    className={`flex-1 py-2 px-2.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+                      searchMode === 'standard'
+                        ? 'bg-white text-indigo-700 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                    </svg>
+                    <span>Address & MLS</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!user) {
+                        setShowAuthPrompt(true);
+                        return;
+                      }
+                      setSearchMode('description_images');
+                      if (error) setError(null);
+                    }}
+                    className={`flex-1 py-2 px-2.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+                      searchMode === 'description_images'
+                        ? 'bg-white text-indigo-700 shadow-sm'
+                        : user 
+                          ? 'text-slate-600 hover:text-slate-900'
+                          : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                    title={user ? "Search using description and 2 photos" : "Sign in to unlock Option 2"}
+                  >
+                    {user ? (
+                      <svg className="w-4 h-4 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-3.5 h-3.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                      </svg>
+                    )}
+                    <span>Description & 2 Photos</span>
+                    {!user && (
+                      <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded-full font-bold">
+                        Locked
+                      </span>
+                    )}
+                  </button>
+                </div>
                 
                 <form onSubmit={handleSearch} className="space-y-4">
-                  {/* Address Fields */}
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
-                        Street Address <span className="text-red-500">*</span>
-                      </label>
-                      <input 
-                        type="text" 
-                        name="street" 
-                        value={address.street} 
-                        onChange={handleInputChange}
-                        placeholder="123 Maple Avenue"
-                        className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm ${error && !address.street ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
+                  {searchMode === 'standard' ? (
+                    /* Option 1: Standard Address & MLS Search */
+                    <div className="space-y-3">
                       <div>
                         <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
-                          City <span className="text-red-500">*</span>
+                          Street Address <span className="text-red-500">*</span>
                         </label>
                         <input 
                           type="text" 
-                          name="city" 
-                          value={address.city} 
+                          name="street" 
+                          value={address.street} 
                           onChange={handleInputChange}
-                          placeholder="Beverly Hills"
-                          className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm ${error && !address.city ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
+                          placeholder="123 Maple Avenue"
+                          className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm ${error && !address.street ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
                         />
                       </div>
-                      <div>
-                        <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
-                          State <span className="text-red-500">*</span>
-                        </label>
-                        <input 
-                          type="text" 
-                          name="state" 
-                          value={address.state} 
-                          onChange={handleInputChange}
-                          placeholder="CA"
-                          className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm ${error && !address.state ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
-                        />
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
+                            City <span className="text-red-500">*</span>
+                          </label>
+                          <input 
+                            type="text" 
+                            name="city" 
+                            value={address.city} 
+                            onChange={handleInputChange}
+                            placeholder="Beverly Hills"
+                            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm ${error && !address.city ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
+                            State <span className="text-red-500">*</span>
+                          </label>
+                          <input 
+                            type="text" 
+                            name="state" 
+                            value={address.state} 
+                            onChange={handleInputChange}
+                            placeholder="CA"
+                            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm ${error && !address.state ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
+                          />
+                        </div>
                       </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
-                          Zip Code <span className="text-red-500">*</span>
-                        </label>
-                        <input 
-                          type="text" 
-                          name="zip" 
-                          value={address.zip} 
-                          onChange={handleInputChange}
-                          placeholder="90210"
-                          className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm ${error && !address.zip ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
-                        />
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
+                            Zip Code <span className="text-red-500">*</span>
+                          </label>
+                          <input 
+                            type="text" 
+                            name="zip" 
+                            value={address.zip} 
+                            onChange={handleInputChange}
+                            placeholder="90210"
+                            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm ${error && !address.zip ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
+                            MLS Number <span className="text-red-500">*</span>
+                          </label>
+                          <input 
+                            type="text" 
+                            name="mlsNumber"
+                            value={mlsNumber} 
+                            onChange={(e) => {
+                              setMlsNumber(e.target.value);
+                              if (error) setError(null);
+                            }}
+                            placeholder="MLS#123456"
+                            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm ${error && !mlsNumber ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
-                          MLS Number <span className="text-red-500">*</span>
-                        </label>
-                        <input 
-                          type="text" 
-                          name="mlsNumber"
-                          value={mlsNumber} 
-                          onChange={(e) => {
-                            setMlsNumber(e.target.value);
-                            if (error) setError(null);
-                          }}
-                          placeholder="MLS#123456"
-                          className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm ${error && !mlsNumber ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
-                        />
-                      </div>
-                    </div>
-                  </div>
 
-                  <hr className="border-slate-100 my-4" />
+                      <hr className="border-slate-100 my-4" />
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <ImageUpload 
-                      id="front-img"
-                      label="Front Image" 
-                      image={frontImage} 
-                      onImageChange={setFrontImage} 
-                    />
-                    <ImageUpload 
-                      id="back-img"
-                      label="Back Image" 
-                      image={backImage} 
-                      onImageChange={setBackImage} 
-                    />
-                  </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <ImageUpload 
+                          id="front-img"
+                          label="Front Image" 
+                          image={frontImage} 
+                          onImageChange={setFrontImage} 
+                          required={false}
+                        />
+                        <ImageUpload 
+                          id="back-img"
+                          label="Back Image" 
+                          image={backImage} 
+                          onImageChange={setBackImage} 
+                          required={false}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    /* Option 2: Typed Description & 2 Uploaded Images */
+                    <div className="space-y-4">
+                      <div className="bg-purple-50/70 border border-purple-200/60 rounded-xl p-3 text-xs text-purple-900 leading-relaxed">
+                        <span className="font-semibold block mb-0.5">Option 2 (Unlocked for Logged In Users):</span>
+                        Search with City, State, Zip Code, a typed description, and 2 uploaded property images.
+                      </div>
+
+                      {/* Required Location Fields: City, State, Zip */}
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
+                              City <span className="text-red-500 font-bold">*</span>
+                            </label>
+                            <input 
+                              type="text" 
+                              name="city" 
+                              value={address.city} 
+                              onChange={handleInputChange}
+                              placeholder="e.g. Jonesboro"
+                              className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm ${error && !address.city ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
+                              State <span className="text-red-500 font-bold">*</span>
+                            </label>
+                            <input 
+                              type="text" 
+                              name="state" 
+                              value={address.state} 
+                              onChange={handleInputChange}
+                              placeholder="e.g. GA"
+                              className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm ${error && !address.state ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
+                            Zip Code <span className="text-red-500 font-bold">*</span>
+                          </label>
+                          <input 
+                            type="text" 
+                            name="zip" 
+                            value={address.zip} 
+                            onChange={handleInputChange}
+                            placeholder="e.g. 30236"
+                            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm ${error && !address.zip ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Typed Property Description (Required) */}
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider">
+                            Property Description <span className="text-red-500 font-bold">*</span>
+                          </label>
+                          <span className="text-[11px] text-slate-400">Required</span>
+                        </div>
+                        <textarea
+                          name="description"
+                          value={description}
+                          onChange={handleInputChange}
+                          rows={4}
+                          placeholder="Type property details: architectural style (e.g., modern craftsman, colonial, mid-century), exterior color, roofline, neighborhood/subdivision name, pool, custom kitchen, or standout room features..."
+                          className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm ${error && !description.trim() ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
+                        />
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Provide detailed visual cues, materials, and highlights to match with online video tours.
+                        </p>
+                      </div>
+
+                      <hr className="border-slate-100 my-2" />
+
+                      {/* 2 Required Uploaded Images */}
+                      <div>
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                            2 Uploaded Images <span className="text-red-500 font-bold">*</span>
+                          </span>
+                          <span className="text-[11px] text-indigo-600 font-medium">Both Photos Required</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <ImageUpload 
+                            id="front-img"
+                            label="Photo 1 (Exterior / Front)" 
+                            image={frontImage} 
+                            onImageChange={setFrontImage} 
+                            required={true}
+                          />
+                          <ImageUpload 
+                            id="back-img"
+                            label="Photo 2 (Interior / Feature)" 
+                            image={backImage} 
+                            onImageChange={setBackImage} 
+                            required={true}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {error && (
                     <div className="p-3 bg-red-50 text-red-700 text-sm rounded-md border border-red-200 flex items-start gap-2">
@@ -1417,11 +1664,21 @@ function App() {
                         
                         <section>
                             <h3 className="text-lg font-semibold text-slate-900 mb-2">About R.E.-Image2Vidz</h3>
-                            <p className="text-slate-600 text-sm leading-relaxed">
+                            <p className="text-slate-600 text-sm leading-relaxed mb-3">
                                 This application helps Real Estate professionals find existing video content for properties. 
-                                By combining address data, MLS numbers, and visual recognition from uploaded photos, 
+                                By combining address data, MLS numbers, descriptions, and visual recognition from uploaded photos, 
                                 we scour the web for matching video tours on platforms like YouTube, Vimeo, and agency sites.
                             </p>
+                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2 text-xs text-slate-700">
+                                <div>
+                                    <span className="font-bold text-indigo-700">Option 1: Address & MLS Search</span>
+                                    <p className="text-slate-600 mt-0.5">Search using property street address, city, state, zip code, and MLS number with optional verification photos.</p>
+                                </div>
+                                <div className="pt-2 border-t border-slate-200">
+                                    <span className="font-bold text-purple-700">Option 2: Description & 2 Photos (Logged In)</span>
+                                    <p className="text-slate-600 mt-0.5">Unlocked once you sign in. Search using City, State, and Zip Code (required), a typed property description, and 2 uploaded photos for visual recognition.</p>
+                                </div>
+                            </div>
                         </section>
 
                         <section className="bg-indigo-50 rounded-xl p-5 border border-indigo-100">
@@ -1544,6 +1801,49 @@ function App() {
                             </div>
                         )}
                     </div>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Auth Prompt Modal for 2nd Search Option */}
+      {showAuthPrompt && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setShowAuthPrompt(false)}></div>
+            <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md p-6 overflow-hidden">
+                <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mb-4 mx-auto">
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                </div>
+                <h3 className="text-lg font-bold text-slate-900 text-center mb-2">
+                    Sign In to Unlock Option 2
+                </h3>
+                <p className="text-sm text-slate-600 text-center mb-6 leading-relaxed">
+                    Searching with a typed property description and 2 uploaded images is available once you log in. Sign in to access this 2nd search method and save your searches.
+                </p>
+                <div className="flex flex-col gap-2">
+                    <button
+                        type="button"
+                        onClick={async () => {
+                            setShowAuthPrompt(false);
+                            await handleLogin();
+                            setSearchMode('description_images');
+                        }}
+                        className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 px-4 rounded-lg shadow-sm transition-colors text-sm"
+                    >
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.539-6.033-5.696 c0-3.159,2.701-5.698,6.033-5.698c1.6,0,3.046,0.575,4.172,1.52l2.766-2.753C17.788,3.992,15.343,3,12.544,3 C6.925,3,2.444,7.468,2.444,12.928c0,5.462,4.481,9.932,10.1,9.932c5.838,0,9.726-4.305,9.726-9.932 c0-0.621-0.057-1.226-0.165-1.815H12.545z"/>
+                        </svg>
+                        Sign In with Google
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setShowAuthPrompt(false)}
+                        className="w-full py-2 px-4 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg text-sm font-medium transition-colors"
+                    >
+                        Maybe Later
+                    </button>
                 </div>
             </div>
         </div>

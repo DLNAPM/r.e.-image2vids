@@ -1,9 +1,13 @@
+export type SearchMode = 'standard' | 'description_images';
+
 export interface PropertyDetails {
-  street: string;
+  street?: string;
   city: string;
   state: string;
   zip: string;
-  mlsNumber: string;
+  mlsNumber?: string;
+  description?: string;
+  searchMode?: SearchMode;
 }
 
 export interface VideoSearchResult {

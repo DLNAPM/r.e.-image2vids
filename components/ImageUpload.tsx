@@ -6,9 +6,10 @@ interface ImageUploadProps {
   image: ImageFile | null;
   onImageChange: (image: ImageFile | null) => void;
   id: string;
+  required?: boolean;
 }
 
-const ImageUpload: React.FC<ImageUploadProps> = ({ label, image, onImageChange, id }) => {
+const ImageUpload: React.FC<ImageUploadProps> = ({ label, image, onImageChange, id, required = false }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -109,7 +110,11 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ label, image, onImageChange, 
   return (
     <div className="flex flex-col space-y-2">
       <label htmlFor={id} className="block text-sm font-medium text-slate-700">
-        {label} <span className="text-slate-400 font-normal">(Optional)</span>
+        {label} {required ? (
+          <span className="text-red-500 font-semibold">*</span>
+        ) : (
+          <span className="text-slate-400 font-normal">(Optional)</span>
+        )}
       </label>
       
       {!image ? (

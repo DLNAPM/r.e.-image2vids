@@ -69,7 +69,7 @@ export const searchPropertyVideos = async (
   const isDescriptionMode = details.searchMode === 'description_images' || (!details.street && !!details.description);
 
   const prompt = isDescriptionMode ? `
-    I need you to find ACTUAL, PLAYABLE VIDEO CONTENT for the following real estate property based on its City, State, Zip Code, typed description, and 2 uploaded property images.
+    I need you to find ACTUAL, PLAYABLE VIDEO CONTENT for the following real estate property based on its City, State, Zip Code, and typed description${(frontImage || backImage) ? ', plus attached property images' : ''}.
     Do not provide links to generic listing pages unless they explicitly contain a video tour.
     
     Target Property Location:
@@ -80,9 +80,11 @@ export const searchPropertyVideos = async (
     Property Description provided by the agent/user:
     "${details.description || ''}"
     
-    Visual Information:
-    Two images of the property are attached (Image 1: Front/Exterior, Image 2: Interior/Back/Feature).
-    Analyze their visual architecture, colors, layout, and distinguishing features, and compare them with video thumbnails and tour media.
+    ${(frontImage || backImage) ? `Visual Information:
+    ${frontImage && backImage 
+      ? 'Two images of the property are attached (Photo 1: Exterior/Front, Photo 2: Interior/Feature).'
+      : 'An image of the property is attached.'}
+    Analyze visual architecture, colors, layout, and distinguishing features, and compare them with video thumbnails and tour media.` : ''}
     
     SEARCH STRATEGY:
     - You MUST use the Google Search tool.
@@ -92,7 +94,7 @@ export const searchPropertyVideos = async (
       3. "${details.city} ${details.zip} video walkthrough"
       4. Search queries combining "${details.city} ${details.state}" with key architectural and distinctive phrases from the description: "${(details.description || '').slice(0, 100)}"
       5. Search on YouTube for video walkthroughs, listing tours, and reels in "${details.city} ${details.state} ${details.zip}" matching the property details.
-      6. Use the visual features in the 2 attached images (exterior style, front elevation, interior finishes) to verify video walkthrough matches.
+      ${(frontImage || backImage) ? `6. Use the visual features in the attached image(s) (exterior style, front elevation, interior finishes) to verify video walkthrough matches.` : ''}
     
     STRICT SEARCH REQUIREMENTS:
     1. Search specifically for VIDEO TOURS, WALKTHROUGHS, and DRONE FOOTAGE.

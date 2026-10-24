@@ -122,17 +122,15 @@ function App() {
     e.preventDefault();
     
     if (searchMode === 'description_images') {
-      // Validation for 2nd Search Option
+      // Validation for 2nd Search Option (City, State, Zip, and Description are required; images are optional)
       const missingFields: string[] = [];
       if (!address.city.trim()) missingFields.push("City");
       if (!address.state.trim()) missingFields.push("State");
       if (!address.zip.trim()) missingFields.push("Zip Code");
       if (!description.trim()) missingFields.push("Property Description");
-      if (!frontImage) missingFields.push("Image 1 (Front/Exterior)");
-      if (!backImage) missingFields.push("Image 2 (Back/Interior/Feature)");
 
       if (missingFields.length > 0) {
-        setError(`Please fill in the following required field(s) for Option 2: ${missingFields.join(", ")}`);
+        setError(`Please fill in the following required field(s) for Description Search: ${missingFields.join(", ")}`);
         return;
       }
 
@@ -1050,7 +1048,7 @@ function App() {
                           ? 'text-slate-600 hover:text-slate-900'
                           : 'text-slate-400 hover:text-slate-600'
                     }`}
-                    title={user ? "Search using description and 2 photos" : "Sign in to unlock Option 2"}
+                    title={user ? "Search using description and optional photos" : "Sign in to unlock Option 2"}
                   >
                     {user ? (
                       <svg className="w-4 h-4 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1061,7 +1059,7 @@ function App() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                       </svg>
                     )}
-                    <span>Description & 2 Photos</span>
+                    <span>Description & Photos</span>
                     {!user && (
                       <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded-full font-bold">
                         Locked
@@ -1167,11 +1165,11 @@ function App() {
                       </div>
                     </div>
                   ) : (
-                    /* Option 2: Typed Description & 2 Uploaded Images */
+                    /* Option 2: Typed Description & Optional Uploaded Images */
                     <div className="space-y-4">
                       <div className="bg-purple-50/70 border border-purple-200/60 rounded-xl p-3 text-xs text-purple-900 leading-relaxed">
                         <span className="font-semibold block mb-0.5">Option 2 (Unlocked for Logged In Users):</span>
-                        Search with City, State, Zip Code, a typed description, and 2 uploaded property images.
+                        Search with City, State, Zip Code, and a typed description. Uploaded photos are optional.
                       </div>
 
                       {/* Required Location Fields: City, State, Zip */}
@@ -1243,13 +1241,13 @@ function App() {
 
                       <hr className="border-slate-100 my-2" />
 
-                      {/* 2 Required Uploaded Images */}
+                      {/* Optional Uploaded Images */}
                       <div>
                         <div className="flex justify-between items-center mb-2">
                           <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                            2 Uploaded Images <span className="text-red-500 font-bold">*</span>
+                            Property Photos <span className="text-slate-400 font-normal">(Optional)</span>
                           </span>
-                          <span className="text-[11px] text-indigo-600 font-medium">Both Photos Required</span>
+                          <span className="text-[11px] text-slate-400">Optional Visual Confirmation</span>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                           <ImageUpload 
@@ -1257,14 +1255,14 @@ function App() {
                             label="Photo 1 (Exterior / Front)" 
                             image={frontImage} 
                             onImageChange={setFrontImage} 
-                            required={true}
+                            required={false}
                           />
                           <ImageUpload 
                             id="back-img"
                             label="Photo 2 (Interior / Feature)" 
                             image={backImage} 
                             onImageChange={setBackImage} 
-                            required={true}
+                            required={false}
                           />
                         </div>
                       </div>
@@ -1675,8 +1673,8 @@ function App() {
                                     <p className="text-slate-600 mt-0.5">Search using property street address, city, state, zip code, and MLS number with optional verification photos.</p>
                                 </div>
                                 <div className="pt-2 border-t border-slate-200">
-                                    <span className="font-bold text-purple-700">Option 2: Description & 2 Photos (Logged In)</span>
-                                    <p className="text-slate-600 mt-0.5">Unlocked once you sign in. Search using City, State, and Zip Code (required), a typed property description, and 2 uploaded photos for visual recognition.</p>
+                                    <span className="font-bold text-purple-700">Option 2: Description & Photos (Logged In)</span>
+                                    <p className="text-slate-600 mt-0.5">Unlocked once you sign in. Search using City, State, and Zip Code (required), a typed property description (required), and optional property photos for visual recognition.</p>
                                 </div>
                             </div>
                         </section>
@@ -1820,7 +1818,7 @@ function App() {
                     Sign In to Unlock Option 2
                 </h3>
                 <p className="text-sm text-slate-600 text-center mb-6 leading-relaxed">
-                    Searching with a typed property description and 2 uploaded images is available once you log in. Sign in to access this 2nd search method and save your searches.
+                    Searching with a typed property description and optional photos is available once you log in. Sign in to access this 2nd search method and save your searches.
                 </p>
                 <div className="flex flex-col gap-2">
                     <button
